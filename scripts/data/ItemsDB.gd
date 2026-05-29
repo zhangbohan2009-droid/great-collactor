@@ -1,0 +1,448 @@
+extends RefCounted
+class_name ItemsDB
+## 战国文物数据库。
+## 价格系统保持不变：base_price 仍按“两”为基础价，再由 MarketSystem 乘稀有度倍率和随机波动。
+## 字段：id / name / type / country / rarity / base_price / brief / story
+
+const ItemModel := preload("res://scripts/models/Item.gd")
+
+static func raw_data() -> Array:
+	return [
+		# ============ 白：普通流通物 ============
+		{
+			"id": "qin_bronze_arrowhead",
+			"name": "秦式青铜箭镞",
+			"type": "weapon",
+			"country": "秦",
+			"rarity": 1,
+			"base_price": 8,
+			"brief": "军中常见箭镞",
+			"story": "秦国军制严整，弩矢规格趋于统一。此类青铜箭镞价值不高，但能反映秦军标准化兵器生产的特点。",
+		},
+		{
+			"id": "chu_lacquer_ear_cup",
+			"name": "楚式彩绘漆耳杯",
+			"type": "lacquer",
+			"country": "楚",
+			"rarity": 1,
+			"base_price": 14,
+			"brief": "宴饮小器",
+			"story": "楚地漆器发达，耳杯常用于饮酒和宴饮。黑地朱绘的纹样，是楚文化浪漫审美的日常化体现。",
+		},
+		{
+			"id": "qi_knife_coin",
+			"name": "齐国刀币",
+			"type": "currency",
+			"country": "齐",
+			"rarity": 1,
+			"base_price": 12,
+			"brief": "齐地货币",
+			"story": "齐国商业发达，刀币是齐地流通货币的代表。单枚价值有限，但适合作为判断地域和年代的入门藏品。",
+		},
+		{
+			"id": "yan_bronze_helmet",
+			"name": "燕国青铜胄",
+			"type": "bronze",
+			"country": "燕",
+			"rarity": 1,
+			"base_price": 30,
+			"brief": "北疆军器",
+			"story": "燕国地处北方边疆，军器带有边地防御色彩。青铜胄多见于军旅遗物，保存完整者更受藏家关注。",
+		},
+		{
+			"id": "zhao_bronze_ge",
+			"name": "赵地青铜戈",
+			"type": "weapon",
+			"country": "赵",
+			"rarity": 1,
+			"base_price": 24,
+			"brief": "战场残兵",
+			"story": "赵国长期处在北方军事压力之下，戈、矛、剑等兵器流通广泛。此类青铜戈多为实战或陪葬遗存。",
+		},
+		{
+			"id": "wei_pottery_granary",
+			"name": "魏地陶仓",
+			"type": "pottery",
+			"country": "魏",
+			"rarity": 1,
+			"base_price": 16,
+			"brief": "陶制仓廪",
+			"story": "魏国处中原腹地，农业与城邑经济发达。陶仓虽非贵重器，却能反映战国时期粮食储藏和墓葬观念。",
+		},
+		{
+			"id": "han_pottery_li",
+			"name": "韩地灰陶鬲",
+			"type": "pottery",
+			"country": "韩",
+			"rarity": 1,
+			"base_price": 10,
+			"brief": "日用炊器",
+			"story": "韩地夹处诸强之间，日用陶器风格多受中原文化影响。灰陶鬲是最常见的民生器物之一。",
+		},
+		{
+			"id": "lu_ritual_pottery_shard",
+			"name": "鲁地刻符陶片",
+			"type": "pottery",
+			"country": "鲁",
+			"rarity": 1,
+			"base_price": 18,
+			"brief": "带刻符残片",
+			"story": "鲁地保存周礼传统，刻符陶片虽残，却常被用来判断礼制区文化层与书写习惯。",
+		},
+		{
+			"id": "zhou_small_bronze_bell",
+			"name": "周室小铜铃",
+			"type": "bronze",
+			"country": "周",
+			"rarity": 1,
+			"base_price": 20,
+			"brief": "礼乐配件",
+			"story": "东周王室虽衰，礼乐制度仍影响诸侯。小铜铃多为礼乐或车马附件，象征旧礼秩序的余音。",
+		},
+		{
+			"id": "shu_plain_jade_bead",
+			"name": "蜀地素面玉珠",
+			"type": "jade",
+			"country": "蜀",
+			"rarity": 1,
+			"base_price": 18,
+			"brief": "小型佩饰",
+			"story": "蜀地与中原、秦地之间存在长期交流。素面玉珠不显眼，却常作为串饰或衣饰的一部分流通。",
+		},
+
+		# ============ 蓝：稀奇器物 ============
+		{
+			"id": "bronze_ding_zhou",
+			"name": "周式蟠螭纹鼎",
+			"type": "bronze",
+			"country": "周",
+			"rarity": 2,
+			"base_price": 50,
+			"brief": "中型礼鼎",
+			"story": "鼎是礼制核心器物。战国时期礼崩乐坏，诸侯与贵族仍借鼎显示身份，此类周式纹样常被后世藏家追捧。",
+		},
+		{
+			"id": "jade_bi_disk",
+			"name": "战国谷纹玉璧",
+			"type": "jade",
+			"country": "赵",
+			"rarity": 2,
+			"base_price": 60,
+			"brief": "谷纹礼玉",
+			"story": "玉璧自古为礼天重器，战国玉工善用细密谷纹和蒲纹。完整玉璧常是贵族身份与礼仪等级的象征。",
+		},
+		{
+			"id": "chu_phoenix_silk",
+			"name": "楚地凤鸟绣残片",
+			"type": "silk",
+			"country": "楚",
+			"rarity": 2,
+			"base_price": 45,
+			"brief": "凤鸟纹丝织",
+			"story": "楚人崇凤，丝织与刺绣纹样常见凤鸟、云气和神兽。残片虽小，仍能看见楚文化瑰丽奔放的气质。",
+		},
+		{
+			"id": "chu_lacquer_makeup_box",
+			"name": "楚式彩绘漆奁",
+			"type": "lacquer",
+			"country": "楚",
+			"rarity": 2,
+			"base_price": 48,
+			"brief": "黑地朱绘",
+			"story": "漆奁常作妆奁或盛物器。战国楚墓中漆器数量丰富，黑漆为地、朱彩绘纹，是楚式审美的典型面貌。",
+		},
+		{
+			"id": "warring_bronze_sword",
+			"name": "战国错金青铜剑",
+			"type": "weapon",
+			"country": "赵",
+			"rarity": 2,
+			"base_price": 70,
+			"brief": "将佐佩剑",
+			"story": "战国兵器制造高度发展，部分剑具以错金、错银装饰。它既是实战武器，也是武士与贵族身份的标志。",
+		},
+		{
+			"id": "jade_dragon_pendant",
+			"name": "战国龙形玉佩",
+			"type": "jade",
+			"country": "中山",
+			"rarity": 2,
+			"base_price": 65,
+			"brief": "龙形佩玉",
+			"story": "中山王墓出土大量玉石器，龙形佩姿态多变，显示中山国吸收中原礼玉传统后的地方风格。",
+		},
+		{
+			"id": "qin_crossbow_trigger",
+			"name": "秦弩机",
+			"type": "weapon",
+			"country": "秦",
+			"rarity": 2,
+			"base_price": 60,
+			"brief": "标准化弩件",
+			"story": "秦军以弩阵和标准化军械著称。弩机虽小，却凝结了秦国制度化生产与军功战争的气息。",
+		},
+		{
+			"id": "qi_bronze_mirror",
+			"name": "齐地蟠螭纹铜镜",
+			"type": "bronze",
+			"country": "齐",
+			"rarity": 2,
+			"base_price": 42,
+			"brief": "妆奁铜镜",
+			"story": "齐国富庶，城市生活与奢侈品流通发达。铜镜兼具实用与审美价值，是市井交易中常见的精品。",
+		},
+		{
+			"id": "yan_gold_buckle",
+			"name": "燕地错金带钩",
+			"type": "metal_ware",
+			"country": "燕",
+			"rarity": 2,
+			"base_price": 75,
+			"brief": "错金服饰件",
+			"story": "带钩是贵族服饰与佩具的重要部件。错金工艺提高了装饰性，也让它成为藏家判断身份等级的线索。",
+		},
+		{
+			"id": "han_bronze_measure",
+			"name": "韩地铜量器",
+			"type": "bronze",
+			"country": "韩",
+			"rarity": 2,
+			"base_price": 55,
+			"brief": "市井量器",
+			"story": "战国商业活动频繁，量器关系到税收、交易和官府标准。铜量器常能折射国家治理和市场秩序。",
+		},
+
+		# ============ 橙：珍品 ============
+		{
+			"id": "e_jun_qi_jie",
+			"name": "鄂君启节",
+			"type": "bronze",
+			"country": "楚",
+			"rarity": 3,
+			"base_price": 360,
+			"brief": "楚国通行凭证",
+			"story": "鄂君启节是楚国颁发给贵族商贸运输的水陆通行凭证，错金铭文记录路线、额度和特权，是研究战国交通与税制的珍贵资料。",
+		},
+		{
+			"id": "shang_yang_fangsheng",
+			"name": "商鞅方升",
+			"type": "bronze",
+			"country": "秦",
+			"rarity": 3,
+			"base_price": 350,
+			"brief": "变法量器",
+			"story": "商鞅方升与秦国变法、度量衡制度相关。它不是单纯器物，而是秦国走向强盛的制度象征。",
+		},
+		{
+			"id": "zhongshan_bronze_fanghu",
+			"name": "中山王夔龙纹铜方壶",
+			"type": "bronze",
+			"country": "中山",
+			"rarity": 3,
+			"base_price": 420,
+			"brief": "中山三器之一",
+			"story": "中山王方壶出自战国中山王墓，器身有长篇铭文，记录中山国政治与战争史，是认识神秘中山国的重要实物。",
+		},
+		{
+			"id": "zhongshan_fifteen_lamp",
+			"name": "中山十五连盏铜灯",
+			"type": "bronze",
+			"country": "中山",
+			"rarity": 3,
+			"base_price": 380,
+			"brief": "树形连盏灯",
+			"story": "中山王墓出土的连盏灯造型奇巧，灯架如树，周围伸出多层灯盏，并饰鸟兽，展现中山国青铜工艺的想象力。",
+		},
+		{
+			"id": "chu_tiger_bird_drum",
+			"name": "楚式虎座鸟架鼓",
+			"type": "lacquer",
+			"country": "楚",
+			"rarity": 3,
+			"base_price": 460,
+			"brief": "楚国漆木乐器",
+			"story": "虎座鸟架鼓以卧虎为座、凤鸟为架，通体髹漆彩绘，是楚文化浪漫神秘气质和战国漆木工艺的代表。",
+		},
+		{
+			"id": "chu_lacquer_story_box",
+			"name": "楚彩绘人物车马漆奁",
+			"type": "lacquer",
+			"country": "楚",
+			"rarity": 3,
+			"base_price": 300,
+			"brief": "车马出行图",
+			"story": "战国楚漆器中有人物车马出行图案，画面连贯，色彩鲜明，被视作早期叙事绘画的重要线索。",
+		},
+		{
+			"id": "zeng_lacquer_duck_box",
+			"name": "曾侯乙漆木鸳鸯盒",
+			"type": "lacquer",
+			"country": "曾",
+			"rarity": 3,
+			"base_price": 330,
+			"brief": "鸳鸯形漆盒",
+			"story": "曾侯乙墓出土大量保存良好的漆木器。鸳鸯盒造型灵动，兼具实用与审美，是战国漆器成熟的例证。",
+		},
+		{
+			"id": "bamboo_mozi_slips",
+			"name": "《墨子》残简",
+			"type": "bamboo_slip",
+			"country": "鲁",
+			"rarity": 3,
+			"base_price": 120,
+			"brief": "兼爱非攻",
+			"story": "战国诸子争鸣，墨家以兼爱、非攻和节用闻名。竹简残片虽难完整释读，却承载着思想流派的火种。",
+		},
+		{
+			"id": "bamboo_lunyu_slips",
+			"name": "《论语》竹简",
+			"type": "bamboo_slip",
+			"country": "鲁",
+			"rarity": 3,
+			"base_price": 140,
+			"brief": "孔门语录",
+			"story": "鲁地是儒家传统的重要源头。竹简本身脆弱难存，若能成组出现，往往比普通器物更能牵动学者与藏家。",
+		},
+		{
+			"id": "bamboo_zhuangzi_slips",
+			"name": "《庄子》竹简",
+			"type": "bamboo_slip",
+			"country": "楚",
+			"rarity": 3,
+			"base_price": 130,
+			"brief": "逍遥游",
+			"story": "庄子思想与楚地浪漫想象气质相合。残简若见寓言语句，常会被视作乱世中超脱精神的象征。",
+		},
+
+		# ============ 红：神品 / 传世 ============
+		{
+			"id": "yueking_sword",
+			"name": "越王勾践剑",
+			"type": "bronze",
+			"country": "越",
+			"rarity": 4,
+			"base_price": 800,
+			"brief": "天下第一剑",
+			"story": "越王勾践剑出土于湖北江陵楚墓，剑身有鸟虫书铭文。它以锋利、保存完好和吴越铸剑传说闻名，是先秦青铜剑的巅峰象征。",
+		},
+		{
+			"id": "fuchai_spear",
+			"name": "吴王夫差矛",
+			"type": "bronze",
+			"country": "吴",
+			"rarity": 4,
+			"base_price": 520,
+			"brief": "吴王兵器",
+			"story": "吴王夫差矛与吴越争霸相关，铭文和工艺使其成为判断吴国王室兵器的重要实物。与越王剑同场出现时，拍卖热度极高。",
+		},
+		{
+			"id": "zenghouyi_bells",
+			"name": "曾侯乙编钟",
+			"type": "bronze",
+			"country": "曾",
+			"rarity": 4,
+			"base_price": 1200,
+			"brief": "一钟双音",
+			"story": "曾侯乙编钟出土于湖北随州，整套规模宏大，可演奏完整音阶，代表战国青铜铸造与礼乐文明的高峰。",
+		},
+		{
+			"id": "zhongshan_king_ding",
+			"name": "中山王铁足铜鼎",
+			"type": "bronze",
+			"country": "中山",
+			"rarity": 4,
+			"base_price": 900,
+			"brief": "469字铭文",
+			"story": "中山王铁足铜鼎铭文长达469字，记录中山伐燕功绩与治国训诫，是战国铭文青铜器中的重器。",
+		},
+		{
+			"id": "zhongshan_dragon_phoenix_table",
+			"name": "中山错金银龙凤铜方案",
+			"type": "bronze",
+			"country": "中山",
+			"rarity": 4,
+			"base_price": 1100,
+			"brief": "错金银奇器",
+			"story": "中山王墓出土的错金银龙凤铜方案构思精巧，以鹿、龙、凤承托案面，展现中山国融合北方与中原审美后的奇诡风格。",
+		},
+		{
+			"id": "chu_wangdun_lacquer_drum",
+			"name": "楚王级虎座鸟架鼓",
+			"type": "lacquer",
+			"country": "楚",
+			"rarity": 4,
+			"base_price": 950,
+			"brief": "王级楚漆器",
+			"story": "大型虎座鸟架鼓多出高等级楚墓，以虎、凤、蛇等意象沟通天地，是楚国漆木艺术和礼乐想象的高峰。",
+		},
+		{
+			"id": "heshi_bi",
+			"name": "和氏璧",
+			"type": "jade",
+			"country": "楚",
+			"rarity": 4,
+			"base_price": 2000,
+			"brief": "天下第一玉璧",
+			"story": "和氏璧是先秦最著名的玉器传说之一，关联楚、赵、秦等国。虽具传奇色彩，但作为游戏文物可承载最高级别的玉器想象。",
+		},
+		{
+			"id": "qin_imperial_seal",
+			"name": "传国玉玺",
+			"type": "jade",
+			"country": "秦",
+			"rarity": 4,
+			"base_price": 5000,
+			"brief": "受命于天",
+			"story": "传国玉玺象征秦统一之后的天命与皇权。它属于战国终局之后的超级藏品，用于承接秦灭六国的历史终点。",
+		},
+		{
+			"id": "qin_terracotta_warrior",
+			"name": "秦兵马俑",
+			"type": "pottery",
+			"country": "秦",
+			"rarity": 4,
+			"base_price": 1800,
+			"brief": "地下军阵",
+			"story": "兵马俑属于秦帝国时代的宏大遗存。作为战国至秦的终局文物，它把军国体制、工匠制度和帝国想象凝结成一件神品。",
+		},
+		{
+			"id": "simuwu_ding",
+			"name": "司母戊大方鼎",
+			"type": "bronze",
+			"country": "商",
+			"rarity": 4,
+			"base_price": 1500,
+			"brief": "商代巨鼎",
+			"story": "司母戊大方鼎早于战国，却是青铜礼器体系的极致象征。战国藏家若得此物，等同握住上古王权礼制的源头。",
+		},
+	]
+
+static var _cached: Array = []
+
+static func all_items() -> Array:
+	if _cached.is_empty():
+		var raw := raw_data()
+		for d in raw:
+			var it := ItemModel.new()
+			it.setup_from_dict(d)
+			_cached.append(it)
+	return _cached
+
+static func items_by_rarity(rarity: int) -> Array:
+	var result: Array = []
+	for it in all_items():
+		if it.rarity == rarity:
+			result.append(it)
+	return result
+
+static func random_item_by_rarity(rarity: int, rng: RandomNumberGenerator) -> Resource:
+	var pool := items_by_rarity(rarity)
+	if pool.is_empty():
+		return null
+	return pool[rng.randi() % pool.size()]
+
+static func item_by_id(id: String) -> Resource:
+	for it in all_items():
+		if it.id == id:
+			return it
+	return null
