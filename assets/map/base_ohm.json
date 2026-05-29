@@ -1,0 +1,15 @@
+{
+  "source": "OpenHistoricalMap",
+  "style": "https://www.openhistoricalmap.org/map-styles/main/main.json",
+  "filterDate": "0100-01-01",
+  "bbox": {
+    "minLng": 90.3374387957461,
+    "minLat": 17.999999999997783,
+    "maxLng": 126.66256120426004,
+    "maxLat": 42.49999999999852
+  },
+  "width": 4096,
+  "height": 3240,
+  "attribution": "© OpenHistoricalMap contributors",
+  "note": "OHM tiles are filtered by date in MapLibre before raster export. Game markers are projected onto this bbox with Web Mercator."
+}

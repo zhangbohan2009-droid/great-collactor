@@ -1,0 +1,12 @@
+{
+  "name": "ohm-export",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Export OpenHistoricalMap raster image for 大收藏家 game",
+  "scripts": {
+    "export": "node export.js"
+  },
+  "dependencies": {
+    "puppeteer": "^24.0.0"
+  }
+}

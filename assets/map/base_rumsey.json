@@ -1,0 +1,27 @@
+{
+  "source": "David Rumsey Historical Map Collection",
+  "title": "Sengoku Shichiyu Zu (Map of the Seven Warring States)",
+  "period": "Warring States period, circa 475-221 BCE",
+  "collectionId": "RUMSEY~8~1~361502~90123029",
+  "listNo": "15632.008",
+  "imageNo": "15632008.jp2",
+  "author": "Nagakubo Sekisui; Gongzi Zheng; Senrin",
+  "publisher": "Iba House Jibei",
+  "publicationDate": "1857",
+  "attribution": "David Rumsey Historical Map Collection",
+  "detailUrl": "https://www.davidrumsey.com/luna/servlet/detail/RUMSEY~8~1~361502~90123029:--Map-of-the-Seven-Warring-Sta",
+  "iiifManifest": "https://www.davidrumsey.com/luna/servlet/iiif/m/RUMSEY~8~1~361502~90123029/manifest",
+  "iiifImage": "https://www.davidrumsey.com/luna/servlet/iiif/RUMSEY~8~1~361502~90123029/full/!6144,6144/0/default.jpg",
+  "runtimeImage": "res://assets/map/base_rumsey.png",
+  "originalWidth": 10030,
+  "originalHeight": 7493,
+  "width": 6144,
+  "height": 4589,
+  "projection": "approximate_web_mercator_overlay",
+  "bbox": {
+    "minLng": 93.0,
+    "minLat": 18.0,
+    "maxLng": 124.0,
+    "maxLat": 42.5
+  }
+}

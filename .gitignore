@@ -1,0 +1,18 @@
+# Godot editor/import cache
+.godot/
+
+# Local dependencies and generated browser export tooling cache
+node_modules/
+tools/ohm_export/node_modules/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Local environment/secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
