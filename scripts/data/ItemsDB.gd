@@ -5,9 +5,10 @@ class_name ItemsDB
 ## 字段：id / name / type / country / rarity / base_price / brief / story
 
 const ItemModel := preload("res://scripts/models/Item.gd")
+const QianNianItemsData := preload("res://scripts/data/QianNianItemsData.gd")
 
 static func raw_data() -> Array:
-	return [
+	var data: Array = [
 		# ============ 白：普通流通物 ============
 		{
 			"id": "qin_bronze_arrowhead",
@@ -416,6 +417,8 @@ static func raw_data() -> Array:
 			"story": "司母戊大方鼎早于战国，却是青铜礼器体系的极致象征。战国藏家若得此物，等同握住上古王权礼制的源头。",
 		},
 	]
+	data.append_array(QianNianItemsData.raw_data())
+	return data
 
 static var _cached: Array = []
 
@@ -428,15 +431,30 @@ static func all_items() -> Array:
 			_cached.append(it)
 	return _cached
 
-static func items_by_rarity(rarity: int) -> Array:
+static func gameplay_items() -> Array:
 	var result: Array = []
 	for it in all_items():
-		if it.rarity == rarity:
+		if it.source != "qian-nian-collector" or it.origin_era == "warring_states":
 			result.append(it)
 	return result
 
-static func random_item_by_rarity(rarity: int, rng: RandomNumberGenerator) -> Resource:
-	var pool := items_by_rarity(rarity)
+static func items_by_rarity(rarity: int, preferred_country: String = "") -> Array:
+	var result: Array = []
+	for it in gameplay_items():
+		if it.rarity == rarity:
+			result.append(it)
+	if preferred_country == "":
+		return result
+	var country_pool: Array = []
+	for it in result:
+		if it.country == preferred_country:
+			country_pool.append(it)
+	if not country_pool.is_empty():
+		return country_pool
+	return result
+
+static func random_item_by_rarity(rarity: int, rng: RandomNumberGenerator, preferred_country: String = "") -> Resource:
+	var pool := items_by_rarity(rarity, preferred_country)
 	if pool.is_empty():
 		return null
 	return pool[rng.randi() % pool.size()]

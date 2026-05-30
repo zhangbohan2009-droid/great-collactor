@@ -1,13 +1,13 @@
 extends Control
-## 左上简化同步面板：玩家 ready 状态 + 最新骰点。
+## 左上简化同步面板：玩家位置 + ready 状态 + 最新骰点。
 
-var _rows: Dictionary = {}    # player_id -> { root, name_label, dice_label, check }
+var _rows: Dictionary = {}    # player_id -> { root, name_label, location_label, dice_label, check }
 var _last_dice: Dictionary = {}
 var _rows_box: VBoxContainer
 
 func _init() -> void:
-	custom_minimum_size = Vector2(330, 150)
-	size = Vector2(330, 150)
+	custom_minimum_size = Vector2(380, 184)
+	size = Vector2(380, 184)
 
 func _ready() -> void:
 	_build()
@@ -17,6 +17,8 @@ func _ready() -> void:
 	EventBus.player_ready_changed.connect(_on_ready_changed)
 	EventBus.phase_changed.connect(_on_phase_changed)
 	EventBus.dice_rolled.connect(_on_dice_rolled)
+	EventBus.player_moved.connect(_on_player_moved)
+	EventBus.player_arrived.connect(_on_player_arrived)
 
 func _build() -> void:
 	var bg := Panel.new()
@@ -55,7 +57,7 @@ func _build() -> void:
 
 func _make_row(player) -> Dictionary:
 	var root := Panel.new()
-	root.custom_minimum_size = Vector2(306, 30)
+	root.custom_minimum_size = Vector2(356, 42)
 	var rsb := StyleBoxFlat.new()
 	rsb.bg_color = Color("#1f1610")
 	rsb.border_color = player.color
@@ -82,13 +84,23 @@ func _make_row(player) -> Dictionary:
 
 	row.add_child(_avatar_badge(player))
 
+	var text_box := VBoxContainer.new()
+	text_box.add_theme_constant_override("separation", 0)
+	text_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(text_box)
+
 	var name_lbl := Label.new()
 	name_lbl.text = player.display_name + ("（你）" if player.id == GameConfig.HUMAN_PLAYER_ID else "")
 	name_lbl.add_theme_font_size_override("font_size", 12)
 	name_lbl.add_theme_color_override("font_color", Color("#f5e6c8"))
 	name_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(name_lbl)
+	text_box.add_child(name_lbl)
+
+	var location_lbl := Label.new()
+	location_lbl.add_theme_font_size_override("font_size", 10)
+	location_lbl.add_theme_color_override("font_color", Color("#a89a82"))
+	location_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	text_box.add_child(location_lbl)
 
 	var total_lbl := Label.new()
 	total_lbl.custom_minimum_size = Vector2(66, 0)
@@ -110,7 +122,7 @@ func _make_row(player) -> Dictionary:
 	check.add_theme_color_override("font_color", Color("#7d6a4a"))
 	row.add_child(check)
 
-	return { "root": root, "rank_label": rank_lbl, "name_label": name_lbl, "total_label": total_lbl, "dice_label": dice_lbl, "check": check }
+	return { "root": root, "rank_label": rank_lbl, "name_label": name_lbl, "location_label": location_lbl, "total_label": total_lbl, "dice_label": dice_lbl, "check": check }
 
 func _avatar_badge(player) -> Panel:
 	var badge := Panel.new()
@@ -158,6 +170,8 @@ func _refresh_player(player) -> void:
 	total_label.text = "%d" % GameState.total_assets(player)
 	var dice_label: Label = row["dice_label"]
 	dice_label.text = "骰：%s" % str(_last_dice.get(player.id, "—"))
+	var location_label: Label = row["location_label"]
+	location_label.text = "位置：%s" % _location_text(player.position)
 	var check: Label = row["check"]
 	if _is_ready_phase():
 		if player.ready:
@@ -194,6 +208,24 @@ func _on_dice_rolled(player_id: int, value: int) -> void:
 	var p = GameState.get_player(player_id)
 	if p:
 		_refresh_player(p)
+
+func _on_player_moved(player_id: int, _from_index: int, _to_index: int) -> void:
+	var p = GameState.get_player(player_id)
+	if p:
+		_refresh_player(p)
+
+func _on_player_arrived(player_id: int, _tile_index: int) -> void:
+	var p = GameState.get_player(player_id)
+	if p:
+		_refresh_player(p)
+
+func _location_text(tile_index: int) -> String:
+	var tile = GameState.tile_at(tile_index)
+	if tile == null:
+		return "未知"
+	if tile.country == "":
+		return tile.display_name
+	return "%s · %s" % [tile.display_name, tile.country]
 
 func _ranked_players() -> Array:
 	var ranked := GameState.ranking_data()

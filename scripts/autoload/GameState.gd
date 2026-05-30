@@ -18,7 +18,9 @@ var rng := RandomNumberGenerator.new()
 var _seen_intro: Dictionary = {}
 var codex_item_ids: Dictionary = {}
 var city_visit_counts: Dictionary = {}
+var region_visit_counts: Dictionary = {}
 var current_player_profile: Dictionary = {}
+var current_game_mode: String = "normal"
 
 func reset_for_new_game() -> void:
 	rng.randomize()
@@ -28,17 +30,25 @@ func reset_for_new_game() -> void:
 	_seen_intro.clear()
 	codex_item_ids.clear()
 	city_visit_counts.clear()
+	region_visit_counts.clear()
+	current_game_mode = "normal"
 	_build_players()
 	_build_map()
 
 func apply_player_profile(profile: Dictionary) -> void:
 	current_player_profile = profile.duplicate(true)
+	current_game_mode = str(profile.get("game_mode", "normal"))
 	var human = human_player()
 	if human == null:
 		return
 	human.display_name = str(profile.get("name", human.display_name))
 	human.avatar_id = str(profile.get("avatar_id", human.avatar_id))
 	human.color = profile.get("color", human.color)
+	if is_journey_mode():
+		human.money = GameConfig.JOURNEY_START_MONEY
+		for tool in GameConfig.TOOL_DEFS:
+			human.tools[str(tool.get("id", ""))] = GameConfig.JOURNEY_TOOL_COUNT
+		_keep_human_only_for_journey()
 	human.unspent_skill_points = int(profile.get("skill_points", human.unspent_skill_points))
 	var skill_id := str(profile.get("initial_skill", ""))
 	if skill_id != "" and can_unlock_skill(human, skill_id):
@@ -109,9 +119,11 @@ func to_save_dict() -> Dictionary:
 		"version": 1,
 		"current_round": current_round,
 		"current_phase": current_phase,
+		"game_mode": current_game_mode,
 		"players": player_data,
 		"codex_item_ids": codex_item_ids,
 		"city_visit_counts": city_visit_counts,
+		"region_visit_counts": region_visit_counts,
 		"seen_intro": _seen_intro,
 		"profile": current_player_profile,
 	}
@@ -119,10 +131,12 @@ func to_save_dict() -> Dictionary:
 func load_from_save_dict(data: Dictionary) -> void:
 	current_round = int(data.get("current_round", 0))
 	current_phase = str(data.get("current_phase", "round_begin"))
+	current_game_mode = str(data.get("game_mode", data.get("profile", {}).get("game_mode", "normal")))
 	auction_session = {}
 	_seen_intro = data.get("seen_intro", {}).duplicate(true)
 	codex_item_ids = data.get("codex_item_ids", {}).duplicate(true)
 	city_visit_counts = data.get("city_visit_counts", {}).duplicate(true)
+	region_visit_counts = data.get("region_visit_counts", {}).duplicate(true)
 	current_player_profile = data.get("profile", {}).duplicate(true)
 	_build_map()
 	players.clear()
@@ -151,6 +165,16 @@ func load_from_save_dict(data: Dictionary) -> void:
 			inst.setup_from_save_dict(inst_data, item_def)
 			p.inventory.append(inst)
 		players.append(p)
+	if is_journey_mode():
+		_keep_human_only_for_journey()
+
+func _keep_human_only_for_journey() -> void:
+	var human = human_player()
+	if human == null:
+		return
+	human.id = GameConfig.HUMAN_PLAYER_ID
+	human.is_ai = false
+	players = [human]
 
 func _normalize_tools(raw_tools) -> Dictionary:
 	var tools := GameConfig.DEFAULT_TOOLS.duplicate(true)
@@ -164,6 +188,8 @@ func tool_count(player_id: int, tool_id: String) -> int:
 	var p = get_player(player_id)
 	if p == null:
 		return 0
+	if is_journey_mode() and player_id == GameConfig.HUMAN_PLAYER_ID and GameConfig.tool_def(tool_id) != {}:
+		return GameConfig.JOURNEY_TOOL_COUNT
 	return int(p.tools.get(tool_id, 0))
 
 func add_tool(player_id: int, tool_id: String, amount: int = 1) -> bool:
@@ -179,12 +205,18 @@ func consume_tool(player_id: int, tool_id: String, amount: int = 1) -> bool:
 	var p = get_player(player_id)
 	if p == null or amount <= 0:
 		return false
+	if is_journey_mode() and player_id == GameConfig.HUMAN_PLAYER_ID and GameConfig.tool_def(tool_id) != {}:
+		EventBus.tool_used.emit(player_id, tool_id)
+		return true
 	var current := int(p.tools.get(tool_id, 0))
 	if current < amount:
 		return false
 	p.tools[tool_id] = current - amount
 	EventBus.tool_used.emit(player_id, tool_id)
 	return true
+
+func is_journey_mode() -> bool:
+	return current_game_mode == "journey"
 
 func _build_map() -> void:
 	map_tiles.clear()
@@ -193,6 +225,7 @@ func _build_map() -> void:
 		var t = MapTileModel.new()
 		var entry: Dictionary = layout[i]
 		t.index = i
+		t.id = str(entry.get("id", "tile_%d" % i))
 		t.type = entry.get("type", MapTileModel.Type.CITY)
 		t.display_name = entry.get("name", "未名")
 		t.lat = float(entry.get("lat", 33.0))
@@ -237,6 +270,8 @@ func all_ready() -> bool:
 	return true
 
 func is_auction_round(round_num: int) -> bool:
+	if is_journey_mode():
+		return false
 	return GameConfig.AUCTION_ROUNDS.has(round_num)
 
 func change_money(player_id: int, delta: int, reason: String = "") -> bool:
@@ -256,6 +291,30 @@ func city_visit_count(tile_index: int) -> int:
 
 func mark_city_visited(tile_index: int) -> void:
 	city_visit_counts[tile_index] = city_visit_count(tile_index) + 1
+
+func region_key_for_tile(tile) -> String:
+	if tile == null:
+		return ""
+	var country := str(tile.country)
+	if country != "":
+		return country
+	return str(tile.id)
+
+func region_visit_count(key: String) -> int:
+	if key == "":
+		return 0
+	return int(region_visit_counts.get(key, 0))
+
+func region_visit_count_for_tile(tile) -> int:
+	return region_visit_count(region_key_for_tile(tile))
+
+func mark_region_visited(tile) -> int:
+	var key := region_key_for_tile(tile)
+	if key == "":
+		return 0
+	var next_count := region_visit_count(key) + 1
+	region_visit_counts[key] = next_count
+	return next_count
 
 func add_item_to_player(player_id: int, instance) -> void:
 	var p = get_player(player_id)

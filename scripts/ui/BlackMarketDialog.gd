@@ -3,11 +3,13 @@ extends Window
 ## MVP 复用 CityDialog 的"刷文物 + 购买"逻辑，唯一区别：50% 假货风险（玩家鉴定不能 100% 识破）
 
 const MarketSystemRef := preload("res://scripts/systems/MarketSystem.gd")
+const TradeResultDialog := preload("res://scripts/ui/TradeResultDialog.gd")
 
 var _tile = null
 var _stock: Array = []
 var _cards: Array = []
 var _intro_cb: Callable
+var _cn_font: SystemFont
 
 func set_intro_callback(cb: Callable) -> void:
 	_intro_cb = cb
@@ -46,8 +48,8 @@ func _ensure_help_button() -> void:
 
 func _init() -> void:
 	title = "黑市"
-	size = Vector2i(640, 460)
-	min_size = Vector2i(560, 400)
+	size = Vector2i(920, 660)
+	min_size = Vector2i(840, 580)
 	transient = true
 	exclusive = true
 	always_on_top = true
@@ -57,9 +59,16 @@ func setup(tile) -> void:
 	title = "黑市 · %s" % tile.display_name
 
 func _ready() -> void:
+	_ensure_font()
 	_stock = GameFlow.get_bm_stock(_tile.index)
 	_apply_market_peek()
 	_build()
+
+func _ensure_font() -> void:
+	if _cn_font != null:
+		return
+	_cn_font = SystemFont.new()
+	_cn_font.font_names = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Arial Unicode MS"]
 
 func _apply_market_peek() -> void:
 	var human = GameState.human_player()
@@ -90,108 +99,76 @@ func _build() -> void:
 	margin.add_theme_constant_override("margin_bottom", 12)
 	add_child(margin)
 
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 10)
-	margin.add_child(v)
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 10)
+	margin.add_child(root)
 
-	var head := Label.new()
-	head.text = "黑市 · %s（赝品居多，鉴定区间不可全信）" % _tile.display_name
-	head.add_theme_font_size_override("font_size", 14)
-	head.add_theme_color_override("font_color", Color("#c89aff"))
-	v.add_child(head)
+	root.add_child(_label("黑市 · %s" % _tile.display_name, 20, Color("#c89aff")))
+	root.add_child(_label("暗摊价格更狠，赝品也更多。卡片只展示商贩话术和暗价，真伪与真实价值需要谨慎判断。", 13, Color("#bfa7d8")))
 
 	var grid := GridContainer.new()
-	grid.columns = 2
+	grid.columns = 4
 	grid.add_theme_constant_override("h_separation", 12)
 	grid.add_theme_constant_override("v_separation", 12)
-	v.add_child(grid)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(grid)
 
 	for inst in _stock:
 		grid.add_child(_make_card(inst))
 
 	var bottom := HBoxContainer.new()
 	bottom.alignment = BoxContainer.ALIGNMENT_END
-	v.add_child(bottom)
-	var close_btn := _make_btn("离 开", Color("#7d6a4a"))
+	root.add_child(bottom)
+	var close_btn := _make_btn(_end_turn_button_text(), _end_turn_button_color())
+	close_btn.custom_minimum_size = Vector2(230 if _will_enter_auction_after_close() else 130, 38)
+	close_btn.tooltip_text = _end_turn_button_text()
 	close_btn.pressed.connect(func(): emit_signal("close_requested"))
 	bottom.add_child(close_btn)
 
 func _make_card(inst: Resource) -> Panel:
-	var card := Panel.new()
-	card.custom_minimum_size = Vector2(260, 120)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("#28172a")
-	sb.border_color = Color("#5a3a78")
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(6)
-	card.add_theme_stylebox_override("panel", sb)
-
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 10)
-	h.anchor_right = 1.0
-	h.anchor_bottom = 1.0
-	h.offset_left = 10
-	h.offset_top = 10
-	h.offset_right = -10
-	h.offset_bottom = -10
-	card.add_child(h)
-
-	var icon_panel := Panel.new()
-	icon_panel.custom_minimum_size = Vector2(56, 56)
-	var icon_sb := StyleBoxFlat.new()
-	icon_sb.bg_color = Color("#6a5070")
-	icon_sb.set_corner_radius_all(4)
-	icon_panel.add_theme_stylebox_override("panel", icon_sb)
-	var icon_lbl := Label.new()
-	icon_lbl.text = inst.type_icon()
-	icon_lbl.add_theme_font_size_override("font_size", 28)
-	icon_lbl.add_theme_color_override("font_color", Color("#f5e6c8"))
-	icon_lbl.anchor_right = 1.0
-	icon_lbl.anchor_bottom = 1.0
-	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	icon_panel.add_child(icon_lbl)
-	h.add_child(icon_panel)
-
-	var v := VBoxContainer.new()
-	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_theme_constant_override("separation", 2)
-	h.add_child(v)
-
-	var name_lbl := Label.new()
-	name_lbl.text = inst.display_name()
-	name_lbl.add_theme_font_size_override("font_size", 15)
-	name_lbl.add_theme_color_override("font_color", Color("#f5e6c8"))
-	v.add_child(name_lbl)
-
-	var info_lbl := Label.new()
-	var range := MarketSystemRef.adjusted_appraisal_range(inst, GameState.human_player())
-	var fake_hint := ""
 	var human = GameState.human_player()
-	if human != null and human.skills.get("fake_sense", false) and inst.is_fake and GameState.rng.randf() < 0.25:
-		fake_hint = " · 疑似赝品"
-	info_lbl.text = "估价：%d – %d 两（真伪不明%s）" % [range.x, range.y, fake_hint]
-	info_lbl.add_theme_font_size_override("font_size", 12)
-	info_lbl.add_theme_color_override("font_color", Color("#c89aff"))
-	info_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	info_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_child(info_lbl)
+	var level := MarketSystemRef.info_level_for_instance(inst, human)
+	var ask_price := MarketSystemRef.ask_price_for_player(inst, GameState.rng, human, true)
+	var card := _base_card(_visible_rarity_color(inst, level))
 
-	var ask_price := MarketSystemRef.ask_price_for_player(inst, GameState.rng, GameState.human_player(), true)
-	var ask_lbl := Label.new()
-	ask_lbl.text = "暗价 %d 两" % ask_price
-	ask_lbl.add_theme_font_size_override("font_size", 12)
-	ask_lbl.add_theme_color_override("font_color", Color("#d4a843"))
-	v.add_child(ask_lbl)
+	var vroot := VBoxContainer.new()
+	vroot.add_theme_constant_override("separation", 10)
+	vroot.anchor_right = 1.0
+	vroot.anchor_bottom = 1.0
+	vroot.offset_left = 12
+	vroot.offset_top = 12
+	vroot.offset_right = -12
+	vroot.offset_bottom = -12
+	card.add_child(vroot)
 
-	var buy_btn := _make_btn("摸 货", Color("#9b5ee0"))
-	buy_btn.custom_minimum_size = Vector2(80, 26)
-	v.add_child(buy_btn)
+	var icon_center := CenterContainer.new()
+	icon_center.add_child(_relic_icon(inst, level))
+	vroot.add_child(icon_center)
 
-	var data := { "inst": inst, "buy_btn": buy_btn, "info_lbl": info_lbl, "ask_price": ask_price }
+	var body := VBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 8)
+	vroot.add_child(body)
+	body.add_child(_label(_sell_title(inst, level), 18, Color("#f5e6c8")))
+	var pitch_lbl := _label("%s：%s" % [_black_market_seller(inst), _black_market_pitch(inst, ask_price)], 13, Color("#d8c6a3"))
+	pitch_lbl.custom_minimum_size = Vector2(0, 84)
+	body.add_child(pitch_lbl)
+	body.add_child(_price_row(ask_price))
+	var risk_lbl := _label(_risk_hint(inst, level), 12, _visible_rarity_color(inst, level))
+	body.add_child(risk_lbl)
+
+	var btn_col := HBoxContainer.new()
+	btn_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	vroot.add_child(btn_col)
+	var buy_btn := _make_btn("摸货", Color("#9b5ee0"))
+	buy_btn.custom_minimum_size = Vector2(86, 32)
+	btn_col.add_child(buy_btn)
+
+	var data := { "inst": inst, "buy_btn": buy_btn, "info_lbl": risk_lbl, "ask_price": ask_price }
 	_cards.append(data)
 	buy_btn.pressed.connect(_on_buy.bind(data))
-
 	return card
 
 func _on_buy(data: Dictionary) -> void:
@@ -206,16 +183,146 @@ func _on_buy(data: Dictionary) -> void:
 	if human.inventory.size() >= GameState.inventory_capacity(human):
 		EventBus.toast.emit("库容已满，先整理背包", "warn")
 		return
+	var before_fragments := int(human.history_fragments)
+	var before_level := int(human.level)
 	if GameFlow.human_buy_item(_tile.index, inst, price):
 		var btn: Button = data["buy_btn"]
 		btn.disabled = true
 		btn.text = "已入手"
 		var info: Label = data["info_lbl"]
-		info.text = "已入手  ·  真假未明，入库估值 ≈ %d 两" % int(inst.estimated_value)
+		info.text = "已入手，藏品已收入仓库。"
+		human = GameState.human_player()
+		var after_fragments := before_fragments if human == null else int(human.history_fragments)
+		var after_level := before_level if human == null else int(human.level)
+		_show_purchase_result(inst, before_fragments, before_level, after_fragments, after_level)
+
+func _show_purchase_result(inst: Resource, before_fragments: int, before_level: int, after_fragments: int, after_level: int) -> void:
+	var dlg := TradeResultDialog.new()
+	dlg.setup_purchase(inst, before_fragments, before_level, after_fragments, after_level)
+	dlg.close_requested.connect(func():
+		if is_instance_valid(dlg):
+			dlg.queue_free()
+	)
+	add_child(dlg)
+	dlg.popup_centered()
+
+func _will_enter_auction_after_close() -> bool:
+	return GameState.current_phase == "event" and GameState.is_auction_round(GameState.current_round)
+
+func _end_turn_button_text() -> String:
+	if _will_enter_auction_after_close():
+		return "结束回合，进入拍卖会环节"
+	return "结束回合"
+
+func _end_turn_button_color() -> Color:
+	if _will_enter_auction_after_close():
+		return Color("#b03020")
+	return Color("#7d6a4a")
+
+func _base_card(color: Color) -> Panel:
+	var card := Panel.new()
+	card.custom_minimum_size = Vector2(205, 420)
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("#28172a")
+	sb.border_color = color
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(10)
+	card.add_theme_stylebox_override("panel", sb)
+	return card
+
+func _relic_icon(inst: Resource, level: int) -> Panel:
+	var panel := Panel.new()
+	panel.custom_minimum_size = Vector2(90, 120)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = inst.rarity_color().darkened(0.35) if level >= 3 else Color("#5b5650")
+	sb.border_color = Color("#1f1610")
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(8)
+	panel.add_theme_stylebox_override("panel", sb)
+	var lbl := _label(inst.type_icon() if level >= 2 else "?", 34, Color("#f5e6c8"))
+	lbl.anchor_right = 1.0
+	lbl.anchor_bottom = 1.0
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	panel.add_child(lbl)
+	return panel
+
+func _price_row(price: int) -> PanelContainer:
+	var box := PanelContainer.new()
+	box.custom_minimum_size = Vector2(0, 42)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.045, 0.025, 0.82)
+	sb.border_color = Color("#5a3a78")
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 10
+	sb.content_margin_right = 10
+	sb.content_margin_top = 5
+	sb.content_margin_bottom = 5
+	box.add_theme_stylebox_override("panel", sb)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 8)
+	box.add_child(row)
+	var coin := TextureRect.new()
+	coin.texture = load("res://assets/ui/coin.png")
+	coin.custom_minimum_size = Vector2(22, 22)
+	coin.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	coin.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	row.add_child(coin)
+	var label := _label("暗价", 12, Color("#d8c6a3"))
+	label.custom_minimum_size = Vector2(34, 0)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(label)
+	var price_lbl := _label(str(price), 22, Color("#ffd166"))
+	price_lbl.custom_minimum_size = Vector2(58, 0)
+	price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	price_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.82))
+	price_lbl.add_theme_constant_override("outline_size", 2)
+	row.add_child(price_lbl)
+	row.add_child(_label("两", 12, Color("#d4a843")))
+	return box
+
+func _sell_title(inst: Resource, level: int) -> String:
+	if level >= 3:
+		return "%s（%s）" % [inst.display_name(), inst.def.rarity_label()]
+	return inst.display_name()
+
+func _visible_rarity_color(inst: Resource, level: int) -> Color:
+	if level >= 3:
+		return inst.rarity_color()
+	return Color("#6f6860")
+
+func _risk_hint(inst: Resource, level: int) -> String:
+	var human = GameState.human_player()
+	if human != null and human.skills.get("fake_sense", false) and inst.is_fake and GameState.rng.randf() < 0.25:
+		return "黑市风险：疑似赝品"
+	if level >= 3:
+		return "已识别：%s级，但黑市仍有赝品风险" % inst.def.rarity_label()
+	return "鉴赏不足：稀有度与真伪都看不稳"
+
+func _black_market_seller(inst: Resource) -> String:
+	var sellers := ["暗摊老板", "蒙面货主", "夜市牙人", "走水客"]
+	return sellers[abs(hash(inst.display_name())) % sellers.size()]
+
+func _black_market_pitch(inst: Resource, ask_price: int) -> String:
+	match inst.rarity():
+		1:
+			return "小物件不多问来路，今晚 %d 两拿走。" % ask_price
+		2:
+			return "这东西有点眼力才敢收，暗价 %d 两。" % ask_price
+		3:
+			return "白天不敢摆，夜里才出手，%d 两别声张。" % ask_price
+		_:
+			return "压着消息来的硬货，错过就没了，%d 两。" % ask_price
 
 func _make_btn(text: String, color: Color) -> Button:
 	var b := Button.new()
 	b.text = text
+	b.add_theme_font_override("font", _cn_font)
 	b.add_theme_font_size_override("font_size", 12)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = color.darkened(0.5)
@@ -231,3 +338,13 @@ func _make_btn(text: String, color: Color) -> Button:
 	b.add_theme_stylebox_override("disabled", sbd)
 	b.add_theme_color_override("font_color", Color("#f5e6c8"))
 	return b
+
+func _label(text: String, size_px: int, color: Color) -> Label:
+	_ensure_font()
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_override("font", _cn_font)
+	lbl.add_theme_font_size_override("font_size", size_px)
+	lbl.add_theme_color_override("font_color", color)
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return lbl

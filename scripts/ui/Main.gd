@@ -9,11 +9,13 @@ const MapViewScreen := preload("res://scripts/ui/MapView.gd")
 const AuctionScreenUI := preload("res://scripts/ui/AuctionScreen.gd")
 const RankingScreenUI := preload("res://scripts/ui/RankingScreen.gd")
 const SettingsDialog := preload("res://scripts/ui/SettingsDialog.gd")
+const CodexDialog := preload("res://scripts/ui/CodexDialog.gd")
 const COIN_TEXTURE := "res://assets/ui/coin.png"
 
 var _current_screen: Control = null
 var _toast_layer: CanvasLayer = null
 var _autoplay_mode: bool = false
+var _pending_journey_mode: bool = false
 
 func _ready() -> void:
 	_setup_toast_layer()
@@ -51,35 +53,44 @@ func _swap_screen(new_screen: Control) -> void:
 	_current_screen = new_screen
 
 func _show_main_menu() -> void:
+	AudioManager.play_menu_bgm()
 	var screen: Control = MainMenuScreen.new()
 	screen.new_game_requested.connect(_on_new_game)
 	screen.continue_requested.connect(_on_continue_game)
+	screen.codex_requested.connect(_open_codex)
 	screen.settings_requested.connect(_open_main_settings)
 	screen.quit_requested.connect(_on_quit)
 	_swap_screen(screen)
 
 func _show_map_select() -> void:
+	AudioManager.play_menu_bgm()
 	var screen = MapSelectScreen.new()
 	screen.single_player_requested.connect(_on_single_player_requested)
+	screen.journey_mode_requested.connect(_on_journey_mode_requested)
 	screen.back_requested.connect(_show_main_menu)
 	_swap_screen(screen)
 
-func _show_character_setup(map_id: String) -> void:
+func _show_character_setup(map_id: String, journey_mode: bool = false) -> void:
+	AudioManager.play_menu_bgm()
+	_pending_journey_mode = journey_mode
 	var screen = CharacterSetupScreen.new()
 	screen.start_requested.connect(_on_character_start.bind(map_id))
 	screen.back_requested.connect(_show_map_select)
 	_swap_screen(screen)
 
 func _show_map_view() -> void:
+	AudioManager.play_game_bgm()
 	var screen: Control = MapViewScreen.new()
 	_swap_screen(screen)
 
 func _show_auction(session: Dictionary) -> void:
+	AudioManager.play_game_bgm()
 	var screen: Control = AuctionScreenUI.new()
 	screen.session = session
 	_swap_screen(screen)
 
 func _show_ranking() -> void:
+	AudioManager.play_menu_bgm()
 	var screen: Control = RankingScreenUI.new()
 	screen.back_to_menu_requested.connect(_show_main_menu)
 	_swap_screen(screen)
@@ -89,12 +100,18 @@ func _on_new_game() -> void:
 	_show_map_select()
 
 func _on_single_player_requested(map_id: String) -> void:
-	_show_character_setup(map_id)
+	_show_character_setup(map_id, false)
+
+func _on_journey_mode_requested(map_id: String) -> void:
+	_show_character_setup(map_id, true)
 
 func _on_character_start(profile: Dictionary, _map_id: String) -> void:
 	# 先准备 GameState 再展示 MapView，确保棋子能创建
 	SaveSystem.delete_save()
+	if _pending_journey_mode:
+		profile["game_mode"] = "journey"
 	GameFlow.prepare_new_game(profile)
+	_pending_journey_mode = false
 	_show_map_view()
 	await get_tree().process_frame
 	GameFlow.start_new_game()
@@ -112,6 +129,15 @@ func _on_quit() -> void:
 
 func _open_main_settings() -> void:
 	var dlg := SettingsDialog.new()
+	add_child(dlg)
+	dlg.close_requested.connect(func():
+		if is_instance_valid(dlg):
+			dlg.queue_free()
+	)
+	dlg.popup_centered()
+
+func _open_codex() -> void:
+	var dlg := CodexDialog.new()
 	add_child(dlg)
 	dlg.close_requested.connect(func():
 		if is_instance_valid(dlg):

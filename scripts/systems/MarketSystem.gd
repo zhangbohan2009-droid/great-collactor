@@ -32,6 +32,29 @@ const BLACK_MARKET_PATTERNS: Array = [
 
 const CITY_BUYER_TITLES: Array[String] = ["急用礼器的士人", "北来行商", "豪门管事", "旧藏修补客", "路过掌柜"]
 
+const SELLER_PITCHES: Dictionary = {
+	1: [
+		"小玩意儿不压手，掌柜只喊 {price} 两，拿回去练眼最合适。",
+		"乡间新收的日用古器，开价 {price} 两，胜在稳当。",
+		"不是什么镇店宝，贵在来路清爽，{price} 两就能带走。",
+	],
+	2: [
+		"这件有些门道，懂行的才会停步，要价 {price} 两。",
+		"纹样和包浆都顺眼，掌柜说 {price} 两不二价。",
+		"寻常摊上见不着这样的成色，{price} 两算给识货人的价。",
+	],
+	3: [
+		"压箱底的好货，若不是急着周转，{price} 两绝不出手。",
+		"这器物气口不俗，藏家见了要争，今日只报 {price} 两。",
+		"掌柜拍着柜台说，这是能撑门面的珍品，{price} 两拿走。",
+	],
+	4: [
+		"镇店级别的东西，错过难再遇，掌柜咬死 {price} 两。",
+		"这不是普通买卖，是赌一眼定乾坤，开价 {price} 两。",
+		"传闻已有豪客问过价，今日你先到，{price} 两可谈成。",
+	],
+}
+
 static func _roll_real_price(item: Resource, rng: RandomNumberGenerator) -> int:
 	var mult: float = GameConfig.RARITY_PRICE_MULT[item.rarity]
 	var fluct: float = rng.randf_range(0.85, 1.15)
@@ -57,16 +80,16 @@ static func _make_instance(item: Resource, rng: RandomNumberGenerator, fake_chan
 	inst.estimated_value = float(inst.real_price)
 	return inst
 
-static func roll_city_offers(rng: RandomNumberGenerator, player, visit_count: int = 0) -> Array:
+static func roll_city_offers(rng: RandomNumberGenerator, player, visit_count: int = 0, preferred_country: String = "") -> Array:
 	var offers: Array = []
 	var buy_slots := _city_buy_slots(rng, player)
 	var sell_slots := 4 - buy_slots
 	for i in range(sell_slots):
-		offers.append(_roll_city_sell_offer(rng, player, visit_count))
+		offers.append(_roll_city_sell_offer(rng, player, visit_count, preferred_country))
 	for i in range(buy_slots):
 		var buy_offer := _roll_city_buy_offer(rng, player)
 		if buy_offer.is_empty():
-			offers.append(_roll_city_sell_offer(rng, player, visit_count))
+			offers.append(_roll_city_sell_offer(rng, player, visit_count, preferred_country))
 		else:
 			offers.append(buy_offer)
 	offers.shuffle()
@@ -82,14 +105,14 @@ static func _city_buy_slots(rng: RandomNumberGenerator, player) -> int:
 		slots += 1
 	return min(slots, 2)
 
-static func _roll_city_sell_offer(rng: RandomNumberGenerator, player, visit_count: int = 0) -> Dictionary:
+static func _roll_city_sell_offer(rng: RandomNumberGenerator, player, visit_count: int = 0, preferred_country: String = "") -> Dictionary:
 	var tier: int = clampi(visit_count, 0, CITY_RARITY_BY_VISIT.size() - 1)
 	var patterns: Array = CITY_RARITY_BY_VISIT[tier]
 	var pattern: Array = patterns[rng.randi() % patterns.size()]
 	var rarity: int = int(pattern[rng.randi() % pattern.size()])
 	if player != null and player.skills.get("dark_market_tip", false) and rng.randf() < 0.10:
 		rarity = min(4, rarity + 1)
-	var item := ItemsDBRef.random_item_by_rarity(rarity, rng)
+	var item := ItemsDBRef.random_item_by_rarity(rarity, rng, preferred_country)
 	if item == null:
 		return {}
 	var fake_chance := 0.0
@@ -105,6 +128,7 @@ static func _roll_city_sell_offer(rng: RandomNumberGenerator, player, visit_coun
 		"ask_price": ask,
 		"info_level": info_level_for_instance(inst, player),
 		"seller": ["老铺掌柜", "行脚货郎", "士族家仆", "旧货牙人"][rng.randi() % 4],
+		"pitch": _seller_pitch(inst.rarity(), ask, rng),
 	}
 
 static func _roll_city_buy_offer(rng: RandomNumberGenerator, player) -> Dictionary:
@@ -146,12 +170,17 @@ static func info_level_for_instance(instance: Resource, player) -> int:
 		return 2
 	return 1
 
+static func _seller_pitch(rarity: int, ask_price: int, rng: RandomNumberGenerator) -> String:
+	var lines: Array = SELLER_PITCHES.get(clampi(rarity, 1, 4), SELLER_PITCHES[1])
+	var text := str(lines[rng.randi() % lines.size()])
+	return text.replace("{price}", str(ask_price))
+
 ## 生成城市文物列表（4 件，按一种配比）
-static func roll_city_stock(rng: RandomNumberGenerator) -> Array:
+static func roll_city_stock(rng: RandomNumberGenerator, preferred_country: String = "") -> Array:
 	var pattern: Array = CITY_RARITY_PATTERNS[rng.randi() % CITY_RARITY_PATTERNS.size()]
 	var stock: Array = []
 	for r in pattern:
-		var it := ItemsDBRef.random_item_by_rarity(r, rng)
+		var it := ItemsDBRef.random_item_by_rarity(r, rng, preferred_country)
 		if it == null:
 			continue
 		var inst := _make_instance(it, rng, 0.0)
@@ -159,11 +188,11 @@ static func roll_city_stock(rng: RandomNumberGenerator) -> Array:
 	return stock
 
 ## 生成黑市文物列表（4 件，有 50% 假货概率）
-static func roll_black_market_stock(rng: RandomNumberGenerator) -> Array:
+static func roll_black_market_stock(rng: RandomNumberGenerator, preferred_country: String = "") -> Array:
 	var pattern: Array = BLACK_MARKET_PATTERNS[rng.randi() % BLACK_MARKET_PATTERNS.size()]
 	var stock: Array = []
 	for r in pattern:
-		var it := ItemsDBRef.random_item_by_rarity(r, rng)
+		var it := ItemsDBRef.random_item_by_rarity(r, rng, preferred_country)
 		if it == null:
 			continue
 		var inst := _make_instance(it, rng, 0.5)

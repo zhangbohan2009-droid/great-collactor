@@ -8,6 +8,8 @@ const PLAYER_COUNT: int = 3
 const HUMAN_PLAYER_ID: int = 0
 
 const START_MONEY: int = 300
+const JOURNEY_START_MONEY: int = 10000
+const JOURNEY_TOOL_COUNT: int = 999
 const DICE_MIN: int = 1
 const DICE_MAX: int = 6
 
@@ -21,6 +23,55 @@ const RARITY_COLORS: Array[Color] = [
 	Color("#b03020"), # 红
 ]
 const RARITY_PRICE_MULT: Array[float] = [0.0, 1.0, 2.0, 4.0, 8.0]
+
+const ERA_NAMES: Dictionary = {
+	"ancient": "远古",
+	"spring_autumn": "春秋",
+	"warring_states": "战国",
+	"qin": "秦",
+	"western_han": "西汉",
+	"xin_eastern_han": "新莽 · 东汉",
+	"three_kingdoms": "三国",
+	"jin": "两晋",
+	"northern_southern": "南北朝",
+	"sui_tang": "隋唐",
+	"five_dynasties": "五代十国",
+	"song": "两宋",
+	"yuan": "元",
+	"ming": "明",
+	"qing": "清",
+	"republic": "民国",
+	"modern": "现代",
+}
+
+const REGION_LABELS: Dictionary = {
+	"zhou": "周",
+	"qi": "齐",
+	"chu": "楚",
+	"qin": "秦",
+	"yan": "燕",
+	"han": "韩",
+	"zhao": "赵",
+	"wei": "魏",
+	"yue": "越",
+	"wu": "吴",
+	"lu": "鲁",
+	"song": "宋",
+	"zheng": "郑",
+	"shu": "蜀",
+	"zeng": "曾",
+	"zhongshan": "中山",
+	"xianyang": "秦",
+	"changan": "汉",
+	"luoyang": "周",
+	"jiankang": "建康",
+	"kaifeng": "汴梁",
+	"linan": "临安",
+	"jingdezhen": "景德镇",
+	"beijing": "北京",
+	"nanjing": "南京",
+	"shanghai": "上海",
+}
 
 # 城市文物刷新数量
 const CITY_ITEM_SLOTS: int = 4
@@ -43,8 +94,18 @@ const AVATAR_COLORS: Dictionary = {
 	"merchant_blue": Color("#3a78a8"),
 	"patron_red": Color("#b03020"),
 }
+const PLAYER_AVATAR_KEY_ART := "res://assets/art/key/player_avatars_key_art.png"
+const KEY_ART_AVATAR_COLUMNS: Dictionary = {
+	"collector_gold": 0,
+	"jade_green": 0,
+	"ink_blue": 1,
+	"merchant_blue": 1,
+	"market_red": 2,
+	"patron_red": 2,
+}
 
 var _avatar_block_cache: Dictionary = {}
+var _avatar_portrait_cache: Dictionary = {}
 
 func get_avatar_color(avatar_id: String) -> Color:
 	return AVATAR_COLORS.get(avatar_id, AVATAR_COLORS["collector_gold"])
@@ -53,12 +114,53 @@ func get_avatar_texture(avatar_id: String, size: int = 64) -> Texture2D:
 	var key := "%s:%d" % [avatar_id, size]
 	if _avatar_block_cache.has(key):
 		return _avatar_block_cache[key]
+	if KEY_ART_AVATAR_COLUMNS.has(avatar_id):
+		var tex := _make_key_art_avatar_texture(avatar_id, size)
+		if tex != null:
+			_avatar_block_cache[key] = tex
+			return tex
 	var color: Color = get_avatar_color(avatar_id)
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	img.fill(color)
 	var tex := ImageTexture.create_from_image(img)
 	_avatar_block_cache[key] = tex
 	return tex
+
+func _make_key_art_avatar_texture(avatar_id: String, size: int) -> Texture2D:
+	var src := Image.new()
+	if src.load(PLAYER_AVATAR_KEY_ART) != OK:
+		return null
+	var column: int = int(KEY_ART_AVATAR_COLUMNS.get(avatar_id, 0))
+	var third_w: int = int(src.get_width() / 3)
+	var crop_size: int = min(third_w, src.get_height())
+	var src_x: int = column * third_w + int((third_w - crop_size) * 0.5)
+	var src_y: int = 0
+	var cropped := Image.create(crop_size, crop_size, false, Image.FORMAT_RGBA8)
+	cropped.blit_rect(src, Rect2i(src_x, src_y, crop_size, crop_size), Vector2i.ZERO)
+	cropped.resize(size, size, Image.INTERPOLATE_LANCZOS)
+	return ImageTexture.create_from_image(cropped)
+
+func get_avatar_portrait_texture(avatar_id: String, size: Vector2i = Vector2i(150, 190)) -> Texture2D:
+	var key := "%s:%dx%d" % [avatar_id, size.x, size.y]
+	if _avatar_portrait_cache.has(key):
+		return _avatar_portrait_cache[key]
+	var tex := _make_key_art_portrait_texture(avatar_id, size)
+	if tex == null:
+		tex = get_avatar_texture(avatar_id, min(size.x, size.y))
+	_avatar_portrait_cache[key] = tex
+	return tex
+
+func _make_key_art_portrait_texture(avatar_id: String, size: Vector2i) -> Texture2D:
+	var src := Image.new()
+	if src.load(PLAYER_AVATAR_KEY_ART) != OK:
+		return null
+	var column: int = int(KEY_ART_AVATAR_COLUMNS.get(avatar_id, 0))
+	var third_w: int = int(src.get_width() / 3)
+	var src_x: int = column * third_w
+	var crop := Image.create(third_w, src.get_height(), false, Image.FORMAT_RGBA8)
+	crop.blit_rect(src, Rect2i(src_x, 0, third_w, src.get_height()), Vector2i.ZERO)
+	crop.resize(size.x, size.y, Image.INTERPOLATE_LANCZOS)
+	return ImageTexture.create_from_image(crop)
 
 const HISTORY_LEVELS: Array[Dictionary] = [
 	{ "level": 1, "fragments": 0, "title": "初入行" },
@@ -189,6 +291,7 @@ const TILE_COLORS: Dictionary = {
 	"black_market": Color("#5a3a78"),
 	"scenic": Color("#4a8060"),
 	"temple": Color("#a08868"),
+	"gambling": Color("#9a4f24"),
 }
 
 const PHASE_NAMES: Dictionary = {
@@ -242,4 +345,142 @@ const TILE_INTROS: Dictionary = {
 			"（MVP 中此处暂作过场，后续会开放「祈愿」与「典籍」事件）",
 		],
 	},
+	"gambling": {
+		"title": "赌坊 · 六博局",
+		"subtitle": "临淄闹市的娱乐摊，赢亏都见真章",
+		"lines": [
+			"赌坊玩法：选择 20 / 50 / 100 两作筹码，与庄家各掷一筹。",
+			"点数高者赢；你赢则获得等额银两，庄家赢则扣除筹码，平局退回。",
+			"这是高波动补钱点，不产出文物；钱少时请谨慎下注。",
+			"之后再进赌坊会直接进入玩法窗口，右上角 ? 可以随时回看规则。",
+		],
+	},
 }
+
+var LOCATION_INTROS: Dictionary = {}
+
+func _ensure_location_intros() -> void:
+	if not LOCATION_INTROS.is_empty():
+		return
+	LOCATION_INTROS = {
+	"chengdu": _city_intro("成都", "蜀地", "巴蜀商路的起点，漆器、玉器与西南旧藏在此汇流。"),
+	"changan": _city_intro("长安", "秦", "关中腹地的重镇，兵器与青铜礼器消息最密。"),
+	"xianyang": _city_intro("咸阳", "秦", "秦国中枢近侧，制度严整，货源价格稳定但竞争激烈。"),
+	"luoyi": _city_intro("洛邑", "周", "周室旧都，礼器、典籍与旧贵族藏品传闻最多。"),
+	"xinzheng": _city_intro("新郑", "韩", "韩地工匠与市井交易活跃，常能遇到小而精的器物。"),
+	"handan": _city_intro("邯郸", "赵", "赵地重城，边地军器与贵族旧藏都可能流入坊市。"),
+	"linzi": _city_intro("临淄", "齐", "齐国富庶，商贾云集，高价货与赝品都会更多。"),
+	"linzi_market": _linzi_market_intro(),
+	"qufu": _city_intro("曲阜", "鲁", "礼乐旧地，竹简、礼器与文教相关藏品更容易出现。"),
+	"yingdu": _city_intro("郢都", "楚", "楚地都邑，漆器、丝织与南方风格器物更具特色。"),
+	"weishui_black_market": _black_market_intro("渭水黑市", "秦地水陆暗线，价低但鉴定信息更不可靠。"),
+	"jibei_black_market": _black_market_intro("蓟北黑市", "燕赵边地的暗摊，军器与远来旧货混杂。"),
+	"taoqiu_black_market": _black_market_intro("陶丘黑市", "魏地商路节点，转手快，赝品也快。"),
+	"hanjiang_black_market": _black_market_intro("汉江口黑市", "楚地水路暗市，稀有货出现率高，风险也高。"),
+	"zhongnan_mountain": _scenic_intro("终南山", "秦岭北麓", "秦地山势深远，隐士、方术与关中旧闻都在山路间流传。"),
+	"tongguan": _scenic_intro("潼关", "关中门户", "扼守东西通道的险关，商队、军旅与流散器物常在此交会。"),
+	"taishan": _scenic_intro("泰山", "齐鲁形胜", "齐鲁礼制想象中的高山，登临可见诸国气象与礼器秩序。"),
+	"yunmeng_marsh": _scenic_intro("云梦泽", "楚地泽国", "江汉之间的水泽地带，楚风器物与民间传闻常在此汇集。"),
+	"emei_temple": _temple_intro("峨眉山寺", "蜀地佛缘", "山寺临云，适合沉心整理见闻，后续可承接拜佛累计与佛缘事件。"),
+	"baima_temple": _temple_intro("白马寺", "洛邑古刹", "中原佛寺意象的核心地点，适合展开典籍、祈愿与古刹藏物事件。"),
+	}
+
+func location_intro_for_tile(tile) -> Dictionary:
+	_ensure_location_intros()
+	if tile != null:
+		var intro: Dictionary = LOCATION_INTROS.get(str(tile.id), {})
+		if not intro.is_empty():
+			return intro
+		var fallback: Dictionary = TILE_INTROS.get(tile.type_key_str(), {}).duplicate(true)
+		fallback["title"] = str(tile.display_name)
+		fallback["category"] = tile.type_key_str()
+		fallback["region"] = str(tile.country)
+		return fallback
+	return {}
+
+func _city_intro(place_name: String, region_name: String, hook: String) -> Dictionary:
+	return {
+		"title": place_name,
+		"category": "city",
+		"subtitle": "%s · 城市坊市" % region_name,
+		"region": region_name,
+		"lines": [
+			hook,
+			"点击城市标记可查看本地背景；真正抵达城市时，会进入古玩铺交易。",
+			"城市交易相对规整，价格较黑市稳定，但高价值货物仍需要鉴定判断。",
+			"重复到访会提高当地货源质量，适合围绕路线规划收购节奏。",
+		],
+	}
+
+func _black_market_intro(place_name: String, hook: String) -> Dictionary:
+	return {
+		"title": place_name,
+		"category": "black_market",
+		"subtitle": "黑市规则 · 高收益高风险",
+		"region": "暗市",
+		"lines": [
+			hook,
+			"黑市货物整体更便宜，也更容易刷出高稀有度物件。",
+			"赝品概率明显更高，鉴定区间也会更宽，眼力不足时容易亏损。",
+			"携带平安符时，抵达黑市会自动消耗并跳过黑市事件；风闻卡可提前提示可见货源的最高稀有度。",
+		],
+	}
+
+func _linzi_market_intro() -> Dictionary:
+	return {
+		"title": "临淄闹市",
+		"category": "gambling",
+		"subtitle": "齐都商业街 · 娱乐街 · 都市景观",
+		"region": "齐 · 今山东淄博临淄一带",
+		"image": "res://assets/ui/location_intros/linzi/liubo_board.jpg",
+		"image_credit": {
+			"source": "https://commons.wikimedia.org/wiki/File:Six_sticks_(liubo)_game_board_and_two_players,_China,_Henan_province,_Eastern_Han_dynasty,_1st-2nd_century_AD,_earthenware_with_calcified_green_lead_glaze_-_Portland_Art_Museum_-_Portland,_Oregon_-_DSC08590.jpg",
+			"license": "Public Domain / CC0",
+			"author": "Daderot",
+		},
+		"lines": [
+			"临淄是战国齐国都城，今山东淄博临淄一带，是当时东方重要的政治、经济与文化中心。",
+			"《史记·苏秦列传》称「临淄甚富而实」，民众吹竽、鼓瑟、弹琴、击筑，也斗鸡、走狗、六博、蹴鞠。",
+			"史书以「车毂击，人肩摩，连衽成帷，举袂成幕，挥汗成雨」形容其街市拥挤与繁华。",
+			"游戏中把这里做成闹市赌坊：它不是古玩铺，而是用六博意象表现齐都娱乐商业气氛。",
+			"参考资料：山东省民政厅《山东古镇古村》齐都镇；《史记·苏秦列传》；Wikimedia Commons Liubo 公共领域图片。",
+		],
+	}
+
+func _scenic_intro(place_name: String, region_name: String, hook: String) -> Dictionary:
+	return {
+		"title": place_name,
+		"category": "scenic",
+		"subtitle": "%s · 景区游历" % region_name,
+		"region": region_name,
+		"image": "res://assets/ui/location_intros/scenic/mountain_background.png",
+		"image_credit": {
+			"source": "https://lpc.opengameart.org/content/bevouliin-free-mountain-game-background",
+			"license": "CC0 / Public Domain",
+			"author": "Bevouliin",
+		},
+		"lines": [
+			hook,
+			"景区节点当前提供历史碎片奖励，并预留 NPC 相遇、隐藏成就和地点图鉴解锁。",
+			"后续可按地点扩展独立事件，例如山路偶遇、碑刻拓片、地方传说与特殊技能线索。",
+		],
+	}
+
+func _temple_intro(place_name: String, region_name: String, hook: String) -> Dictionary:
+	return {
+		"title": place_name,
+		"category": "temple",
+		"subtitle": "%s · 宗教地点" % region_name,
+		"region": region_name,
+		"image": "res://assets/ui/location_intros/temple/temple_cc0.png",
+		"image_credit": {
+			"source": "https://opengameart.org/content/primative-temple-like-structure",
+			"license": "CC0 / Public Domain",
+			"author": "OpenGameArt contributor",
+		},
+		"lines": [
+			hook,
+			"宗教地点当前提供历史碎片奖励，并预留拜佛累计、祈愿、典籍事件与红色技能触发。",
+			"与景区不同，寺庙数据结构保留佛缘/宗教事件扩展入口，后续可记录参拜次数和地点专属奖励。",
+		],
+	}

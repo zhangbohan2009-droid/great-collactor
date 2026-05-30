@@ -5,6 +5,7 @@ extends Control
 
 const AuctionSystemRef := preload("res://scripts/systems/AuctionSystem.gd")
 const AISystemRef := preload("res://scripts/systems/AISystem.gd")
+const AUCTION_SCENE_BG := "res://assets/art/key/auction_scene_bg.png"
 
 var session: Dictionary = {}
 
@@ -12,19 +13,24 @@ var _title_lbl: Label
 var _lot_index_lbl: Label
 var _item_name_lbl: Label
 var _item_info_lbl: Label
+var _lot_card: Panel
 var _icon_panel: Panel
 var _icon_lbl: Label
 var _current_bid_lbl: Label
 var _leader_lbl: Label
+var _auctioneer_lbl: Label
+var _auctioneer_hint_lbl: Label
 var _log_box: VBoxContainer
 var _log_scroll: ScrollContainer
 var _bid_btn: Button
 var _withdraw_btn: Button
+var _exit_session_btn: Button
 var _next_btn: Button
 var _bidder_panels: Dictionary = {}    # player_id -> { panel, money_lbl, status_lbl }
 
 var _running_lot: bool = false
 var _ai_pumping: bool = false
+var _human_left_session: bool = false
 
 func _init() -> void:
 	anchor_right = 1.0
@@ -45,6 +51,21 @@ func _build() -> void:
 	bg.anchor_right = 1.0
 	bg.anchor_bottom = 1.0
 	add_child(bg)
+
+	var scene_bg := TextureRect.new()
+	scene_bg.texture = _load_png_texture(AUCTION_SCENE_BG)
+	scene_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	scene_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	scene_bg.modulate = Color(0.96, 0.90, 0.80, 1.0)
+	scene_bg.anchor_right = 1.0
+	scene_bg.anchor_bottom = 1.0
+	add_child(scene_bg)
+
+	var bg_shade := ColorRect.new()
+	bg_shade.color = Color(0.05, 0.025, 0.012, 0.44)
+	bg_shade.anchor_right = 1.0
+	bg_shade.anchor_bottom = 1.0
+	add_child(bg_shade)
 
 	var margin := MarginContainer.new()
 	margin.anchor_right = 1.0
@@ -87,17 +108,19 @@ func _build() -> void:
 	root.add_child(middle)
 
 	# === 左侧 拍品 ===
-	var left := Panel.new()
-	left.custom_minimum_size = Vector2(440, 360)
-	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_lot_card = Panel.new()
+	_lot_card.custom_minimum_size = Vector2(470, 520)
+	_lot_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_lot_card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var lsb := StyleBoxFlat.new()
 	lsb.bg_color = Color("#2a1f15")
 	lsb.border_color = Color("#5a4630")
-	lsb.set_border_width_all(1)
-	lsb.set_corner_radius_all(6)
-	left.add_theme_stylebox_override("panel", lsb)
-	middle.add_child(left)
+	lsb.set_border_width_all(2)
+	lsb.set_corner_radius_all(12)
+	lsb.shadow_color = Color(0, 0, 0, 0.38)
+	lsb.shadow_size = 8
+	_lot_card.add_theme_stylebox_override("panel", lsb)
+	middle.add_child(_lot_card)
 
 	var lv := VBoxContainer.new()
 	lv.add_theme_constant_override("separation", 8)
@@ -107,7 +130,7 @@ func _build() -> void:
 	lv.offset_top = 14
 	lv.offset_right = -14
 	lv.offset_bottom = -14
-	left.add_child(lv)
+	_lot_card.add_child(lv)
 
 	# 拍品图标 + 名称
 	var item_head := HBoxContainer.new()
@@ -140,21 +163,63 @@ func _build() -> void:
 	_item_name_lbl.text = "—"
 	_item_name_lbl.add_theme_font_size_override("font_size", 22)
 	_item_name_lbl.add_theme_color_override("font_color", Color("#f5e6c8"))
+	_item_name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_item_name_lbl.custom_minimum_size = Vector2(0, 54)
 	name_box.add_child(_item_name_lbl)
 
 	_item_info_lbl = Label.new()
-	_item_info_lbl.text = "估价 — 起拍价 —"
+	_item_info_lbl.text = "拍卖师正在验看拍品"
 	_item_info_lbl.add_theme_font_size_override("font_size", 14)
 	_item_info_lbl.add_theme_color_override("font_color", Color("#a89a82"))
+	_item_info_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	name_box.add_child(_item_info_lbl)
 
 	# 当前价 + leader
+	var auctioneer_panel := Panel.new()
+	auctioneer_panel.custom_minimum_size = Vector2(0, 116)
+	auctioneer_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var asb := StyleBoxFlat.new()
+	asb.bg_color = Color("#1f1610")
+	asb.border_color = Color("#d4a843")
+	asb.set_border_width_all(2)
+	asb.set_corner_radius_all(10)
+	asb.content_margin_left = 14
+	asb.content_margin_right = 14
+	asb.content_margin_top = 10
+	asb.content_margin_bottom = 10
+	auctioneer_panel.add_theme_stylebox_override("panel", asb)
+	lv.add_child(auctioneer_panel)
+
+	var av := VBoxContainer.new()
+	av.anchor_right = 1.0
+	av.anchor_bottom = 1.0
+	av.offset_left = 12
+	av.offset_top = 8
+	av.offset_right = -12
+	av.offset_bottom = -8
+	auctioneer_panel.add_child(av)
+
+	_auctioneer_lbl = Label.new()
+	_auctioneer_lbl.text = "拍卖主：诸位请看台上宝物。"
+	_auctioneer_lbl.add_theme_font_size_override("font_size", 17)
+	_auctioneer_lbl.add_theme_color_override("font_color", Color("#f5e6c8"))
+	_auctioneer_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_auctioneer_lbl.custom_minimum_size = Vector2(0, 58)
+	av.add_child(_auctioneer_lbl)
+
+	_auctioneer_hint_lbl = Label.new()
+	_auctioneer_hint_lbl.text = "举牌跟价，或放弃退席。"
+	_auctioneer_hint_lbl.add_theme_font_size_override("font_size", 12)
+	_auctioneer_hint_lbl.add_theme_color_override("font_color", Color("#d4a843"))
+	av.add_child(_auctioneer_hint_lbl)
+
 	var bid_row := HBoxContainer.new()
 	bid_row.add_theme_constant_override("separation", 16)
+	bid_row.custom_minimum_size = Vector2(0, 40)
 	lv.add_child(bid_row)
 
 	_current_bid_lbl = Label.new()
-	_current_bid_lbl.text = "当前价  0 两"
+	_current_bid_lbl.text = "当前叫价  0 两"
 	_current_bid_lbl.add_theme_font_size_override("font_size", 26)
 	_current_bid_lbl.add_theme_color_override("font_color", Color("#d4a843"))
 	bid_row.add_child(_current_bid_lbl)
@@ -168,21 +233,29 @@ func _build() -> void:
 	# 出价按钮
 	var btn_row := HBoxContainer.new()
 	btn_row.add_theme_constant_override("separation", 8)
+	btn_row.custom_minimum_size = Vector2(0, 46)
 	lv.add_child(btn_row)
 
-	_bid_btn = _make_btn("跟  价（+%d）" % GameConfig.AUCTION_MIN_BID_STEP, Color("#d4a843"))
-	_bid_btn.custom_minimum_size = Vector2(140, 40)
+	_bid_btn = _make_btn("举牌应价（+%d）" % GameConfig.AUCTION_MIN_BID_STEP, Color("#d4a843"))
+	_bid_btn.custom_minimum_size = Vector2(170, 42)
 	_bid_btn.add_theme_font_size_override("font_size", 16)
 	_bid_btn.pressed.connect(_on_player_bid)
 	btn_row.add_child(_bid_btn)
 
-	_withdraw_btn = _make_btn("放  弃", Color("#b03020"))
-	_withdraw_btn.custom_minimum_size = Vector2(110, 40)
+	_withdraw_btn = _make_btn("放下号牌", Color("#b03020"))
+	_withdraw_btn.custom_minimum_size = Vector2(120, 42)
 	_withdraw_btn.add_theme_font_size_override("font_size", 16)
 	_withdraw_btn.pressed.connect(_on_player_withdraw)
 	btn_row.add_child(_withdraw_btn)
 
-	_next_btn = _make_btn("下一件 / 结束", Color("#7da8d4"))
+	_exit_session_btn = _make_btn("退出本次拍卖", Color("#7d6a4a"))
+	_exit_session_btn.custom_minimum_size = Vector2(150, 42)
+	_exit_session_btn.add_theme_font_size_override("font_size", 15)
+	_exit_session_btn.tooltip_text = "退出整场拍卖会；确认后本场剩余拍品由其他玩家继续竞拍"
+	_exit_session_btn.pressed.connect(_confirm_exit_session)
+	btn_row.add_child(_exit_session_btn)
+
+	_next_btn = _make_btn("请下一件 / 收场", Color("#7da8d4"))
 	_next_btn.custom_minimum_size = Vector2(150, 40)
 	_next_btn.add_theme_font_size_override("font_size", 16)
 	_next_btn.visible = false
@@ -192,6 +265,7 @@ func _build() -> void:
 	# 三人出价状态条
 	var bidders_box := HBoxContainer.new()
 	bidders_box.add_theme_constant_override("separation", 8)
+	bidders_box.custom_minimum_size = Vector2(0, 66)
 	lv.add_child(bidders_box)
 	for p in GameState.players:
 		var panel := _make_bidder_panel(p)
@@ -255,6 +329,12 @@ func _make_btn(text: String, color: Color) -> Button:
 	b.add_theme_color_override("font_color", Color("#f5e6c8"))
 	b.add_theme_color_override("font_disabled_color", Color("#7d6a4a"))
 	return b
+
+func _load_png_texture(path: String) -> Texture2D:
+	var img := Image.new()
+	if img.load(path) != OK:
+		return null
+	return ImageTexture.create_from_image(img)
 
 func _show_start_banner() -> void:
 	var panel := Panel.new()
@@ -356,6 +436,14 @@ func _start_current_lot() -> void:
 	isb.bg_color = item.rarity_color().darkened(0.2)
 	isb.set_corner_radius_all(4)
 	_icon_panel.add_theme_stylebox_override("panel", isb)
+	var card_sb := StyleBoxFlat.new()
+	card_sb.bg_color = Color("#2a1f15")
+	card_sb.border_color = item.rarity_color()
+	card_sb.set_border_width_all(3)
+	card_sb.set_corner_radius_all(12)
+	card_sb.shadow_color = Color(0, 0, 0, 0.42)
+	card_sb.shadow_size = 8
+	_lot_card.add_theme_stylebox_override("panel", card_sb)
 	_item_name_lbl.text = "%s（%s）" % [item.display_name, item.rarity_label()]
 	_item_info_lbl.text = "估价 %d – %d 两  ·  起拍 %d 两" % [inst.appraised_low, inst.appraised_high, int(lot["start_bid"])]
 	_current_bid_lbl.text = "起拍价  %d 两" % int(lot["start_bid"])
@@ -364,17 +452,22 @@ func _start_current_lot() -> void:
 	_clear_log()
 	_log("司仪上台：本场第 %d 件 — %s。" % [int(session.get("current_lot", 0)) + 1, item.display_name], "head")
 	_log("起拍价 %d 两。" % int(lot["start_bid"]), "muted")
+	_say_auctioneer(_opening_line(item, lot), "等待第一位买家举牌。")
 
 	# 把 current_bid 初始化为 start_bid，但 leader=-1（视为未有人正式出价）
 	lot["current_bid"] = int(lot["start_bid"])
 	lot["leader_id"] = -1
 	lot["active_bidders"] = []
 	for p in GameState.players:
+		if _human_left_session and p.id == GameConfig.HUMAN_PLAYER_ID:
+			continue
 		lot["active_bidders"].append(p.id)
 
 	_refresh_bidder_panels(lot)
 	_refresh_buttons(lot)
 	_next_btn.visible = false
+	if _human_left_session:
+		_say_auctioneer(_opening_line(item, lot), "你已退出本场拍卖，等待其他玩家竞拍完毕。")
 
 	# 启动 AI 出价循环
 	_ai_round(lot)
@@ -388,7 +481,10 @@ func _refresh_bidder_panels(lot: Dictionary) -> void:
 		var money_lbl: Label = panel["money_lbl"]
 		var status_lbl: Label = panel["status_lbl"]
 		money_lbl.text = "%d 两" % p.money
-		if not active.has(p.id):
+		if _human_left_session and p.id == GameConfig.HUMAN_PLAYER_ID:
+			status_lbl.text = "已离场"
+			status_lbl.add_theme_color_override("font_color", Color("#7d6a4a"))
+		elif not active.has(p.id):
 			status_lbl.text = "已弃拍"
 			status_lbl.add_theme_color_override("font_color", Color("#7d6a4a"))
 		elif lot.get("leader_id", -1) == p.id:
@@ -403,10 +499,32 @@ func _refresh_buttons(lot: Dictionary) -> void:
 	var human_in: bool = active.has(GameConfig.HUMAN_PLAYER_ID)
 	var human = GameState.human_player()
 	var min_bid: int = AuctionSystemRef.next_min_bid(lot)
-	var can_bid: bool = human_in and human != null and human.money >= min_bid and not lot.get("finished", false)
+	var can_bid: bool = not _human_left_session and human_in and human != null and human.money >= min_bid and not lot.get("finished", false)
 	_bid_btn.disabled = not can_bid
-	_bid_btn.text = "跟  价  →  %d 两" % min_bid
-	_withdraw_btn.disabled = not human_in or lot.get("finished", false)
+	_bid_btn.text = "举牌应价  →  %d 两" % min_bid
+	_withdraw_btn.disabled = _human_left_session or not human_in or lot.get("finished", false)
+	_exit_session_btn.disabled = _human_left_session or bool(session.get("finished", false))
+
+func _say_auctioneer(line: String, hint: String = "") -> void:
+	if _auctioneer_lbl != null:
+		_auctioneer_lbl.text = "拍卖主：%s" % line
+	if _auctioneer_hint_lbl != null:
+		_auctioneer_hint_lbl.text = hint
+
+func _opening_line(item: Resource, lot: Dictionary) -> String:
+	return "诸位掌眼，%s，%s级好物，起拍 %d 两。" % [item.display_name, item.rarity_label(), int(lot["start_bid"])]
+
+func _bid_call_line(player_name: String, amount: int) -> String:
+	var lines := [
+		"%s 举牌，%d 两！还有没有更高的？",
+		"%s 出到 %d 两，场上价已经起来了！",
+		"%s 应价 %d 两，诸位可要跟？",
+	]
+	return lines[amount % lines.size()] % [player_name, amount]
+
+func _hammer_line(lot: Dictionary) -> String:
+	var price := int(lot.get("final_price", lot.get("current_bid", 0)))
+	return "%d 两一次，%d 两两次，落槌！" % [price, price]
 
 func _clear_log() -> void:
 	for c in _log_box.get_children():
@@ -456,13 +574,15 @@ func _ai_round(lot: Dictionary) -> void:
 		var bid: int = AISystemRef.decide_auction_bid(p, int(lot["current_bid"]), ceiling, GameConfig.AUCTION_MIN_BID_STEP)
 		if bid > 0:
 			AuctionSystemRef.place_bid(lot, p.id, bid)
-			_current_bid_lbl.text = "当前价  %d 两" % bid
+			_current_bid_lbl.text = "当前叫价  %d 两" % bid
 			_leader_lbl.text = "%s 领先" % p.display_name
 			_log("%s 抬手叫到 %d 两。" % [p.display_name, bid], "ai")
+			_say_auctioneer(_bid_call_line(p.display_name, bid), "你可以举牌跟价，也可以放下号牌。")
 			any_bid = true
 		else:
 			AuctionSystemRef.withdraw(lot, p.id)
 			_log("%s 摇头退席。" % p.display_name, "muted")
+			_say_auctioneer("%s 退了，场上还剩几家？" % p.display_name, "观察对手钱包，别被气氛带过头。")
 		_refresh_bidder_panels(lot)
 		_refresh_buttons(lot)
 		await get_tree().process_frame
@@ -509,9 +629,10 @@ func _on_player_bid() -> void:
 		return
 	var min_bid: int = AuctionSystemRef.next_min_bid(lot)
 	if AuctionSystemRef.place_bid(lot, GameConfig.HUMAN_PLAYER_ID, min_bid):
-		_current_bid_lbl.text = "当前价  %d 两" % min_bid
+		_current_bid_lbl.text = "当前叫价  %d 两" % min_bid
 		_leader_lbl.text = "你 领先"
 		_log("你 加到 %d 两。" % min_bid, "player")
+		_say_auctioneer(_bid_call_line("这位藏家", min_bid), "拍卖主看向其他买家，等他们跟价。")
 		_refresh_bidder_panels(lot)
 		_refresh_buttons(lot)
 		if _check_finalize(lot):
@@ -527,12 +648,62 @@ func _on_player_withdraw() -> void:
 		return
 	AuctionSystemRef.withdraw(lot, GameConfig.HUMAN_PLAYER_ID)
 	_log("你 放下号牌。", "muted")
+	_say_auctioneer("这位藏家暂且收手，买卖不急，眼力要稳。", "剩余买家会继续争夺本件拍品。")
 	_refresh_bidder_panels(lot)
 	_refresh_buttons(lot)
 	if _check_finalize(lot):
 		return
 	# 让 AI 继续抢
 	_ai_round(lot)
+
+func _confirm_exit_session() -> void:
+	if _human_left_session:
+		return
+	var dlg := ConfirmationDialog.new()
+	dlg.title = "退出本次拍卖"
+	dlg.dialog_text = "确认退出本次拍卖会？\n\n退出后你将离开整场拍卖，不能参与剩余拍品。其他玩家会继续竞拍，结束后自动进入下一回合。"
+	dlg.ok_button_text = "确认退出"
+	dlg.cancel_button_text = "继续竞拍"
+	dlg.confirmed.connect(func():
+		if is_instance_valid(dlg):
+			dlg.queue_free()
+		_exit_session()
+	)
+	dlg.canceled.connect(func():
+		if is_instance_valid(dlg):
+			dlg.queue_free()
+	)
+	add_child(dlg)
+	dlg.popup_centered()
+
+func _exit_session() -> void:
+	_human_left_session = true
+	_bid_btn.disabled = true
+	_withdraw_btn.disabled = true
+	_exit_session_btn.disabled = true
+	_log("你 退出本次拍卖会，等待其他买家完成竞拍。", "muted")
+	_say_auctioneer("这位藏家先行离席，余下拍品继续开槌。", "你已退出本场拍卖，等待系统自动进入下一回合。")
+	var lot := AuctionSystemRef.current_lot(session)
+	if lot.is_empty():
+		return
+	if not lot.get("finished", false):
+		if int(lot.get("leader_id", -1)) == GameConfig.HUMAN_PLAYER_ID:
+			lot["leader_id"] = -1
+			lot["current_bid"] = int(lot.get("start_bid", GameConfig.AUCTION_MIN_BID_STEP))
+			_current_bid_lbl.text = "起拍价  %d 两" % int(lot["current_bid"])
+			_leader_lbl.text = "暂无领先"
+			_log("你离场，当前领先出价作废，本件回到起拍价。", "muted")
+		if lot["active_bidders"].has(GameConfig.HUMAN_PLAYER_ID):
+			AuctionSystemRef.withdraw(lot, GameConfig.HUMAN_PLAYER_ID)
+		_refresh_bidder_panels(lot)
+		_refresh_buttons(lot)
+		if _check_finalize(lot):
+			return
+		if not _ai_pumping:
+			_ai_round(lot)
+	else:
+		_next_btn.visible = false
+		_auto_advance_after_exit()
 
 ## 检查并触发落槌；返回是否已结
 func _check_finalize(lot: Dictionary) -> bool:
@@ -557,6 +728,7 @@ func _force_finalize(lot: Dictionary) -> void:
 		print("[auction] finalize lot winner=%d price=%d" % [winner_id, final_price])
 	if winner_id == -1 or final_price <= 0:
 		_log("无人出价，本件流拍。", "muted")
+		_say_auctioneer("无人应价，本件暂且收回。", "点击下一件继续。")
 	else:
 		var p = GameState.get_player(winner_id)
 		if p != null:
@@ -570,13 +742,17 @@ func _force_finalize(lot: Dictionary) -> void:
 					_log("落槌！你以 %d 两拍得 %s。" % [final_price, lot["item"].display_name], "win")
 				else:
 					_log("落槌！%s 以 %d 两拍走 %s。" % [p.display_name, final_price, lot["item"].display_name], "lose")
+				_say_auctioneer(_hammer_line(lot), "本件成交，点击下一件继续。")
 			else:
 				_log("赢家银两不足，本件作废。", "muted")
 	_refresh_bidder_panels(lot)
 	_bid_btn.disabled = true
 	_withdraw_btn.disabled = true
-	_next_btn.visible = true
+	_exit_session_btn.disabled = _human_left_session
+	_next_btn.visible = not _human_left_session
 	_running_lot = false
+	if _human_left_session:
+		_auto_advance_after_exit()
 	if GameConfig.DEBUG_AUTOPLAY:
 		_autoplay_advance_after_finalize()
 
@@ -595,6 +771,14 @@ func _on_next_pressed() -> void:
 		_start_current_lot()
 	else:
 		_finish_session()
+
+func _auto_advance_after_exit() -> void:
+	await get_tree().create_timer(0.8).timeout
+	if not _human_left_session:
+		return
+	if _running_lot:
+		return
+	_on_next_pressed()
 
 # AUTOPLAY 时落槌后自动点 "下一件"
 func _autoplay_advance_after_finalize() -> void:

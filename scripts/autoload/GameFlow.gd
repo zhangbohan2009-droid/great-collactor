@@ -189,7 +189,8 @@ func _phase_move() -> void:
 		var steps: int = int(_last_dice_values.get(p.id, 0))
 		var from_index: int = p.position
 		var direction := get_last_move_direction(p.id)
-		var to_index: int = DiceSystemRef.target_index(from_index, steps, GameConfig.TOTAL_TILES, direction)
+		var total_tiles: int = GameState.map_tiles.size() if not GameState.map_tiles.is_empty() else GameConfig.TOTAL_TILES
+		var to_index: int = DiceSystemRef.target_index(from_index, steps, total_tiles, direction)
 		p.position = to_index
 		_pending_tile_events[p.id] = to_index
 		EventBus.player_moved.emit(p.id, from_index, to_index)
@@ -273,6 +274,8 @@ func _ai_handle_tile_sync(player, tile) -> void:
 		MapTileModel.Type.TEMPLE:
 			GameState.add_history_fragments(player.id, _temple_reward(player), "参访 %s" % tile.display_name)
 			EventBus.toast.emit("%s 在 %s 拜了一拜" % [player.display_name, tile.display_name], "muted")
+		MapTileModel.Type.GAMBLING:
+			_ai_gamble(player, tile)
 
 # 由真人 UI 关闭弹窗时调用
 func human_finish_tile_event() -> void:
@@ -293,6 +296,22 @@ func human_finish_tile_event() -> void:
 	EventBus.tile_event_finished.emit(human.id, human.position)
 	GameState.mark_player_ready(human.id)
 
+func _ai_gamble(player, tile) -> void:
+	var wager: int = 20 if player.money < 140 else 50
+	if player.money < wager:
+		EventBus.toast.emit("%s 路过 %s，没敢入局" % [player.display_name, tile.display_name], "muted")
+		return
+	var player_roll: int = GameState.rng.randi_range(1, 6)
+	var house_roll: int = GameState.rng.randi_range(1, 6)
+	if player_roll > house_roll:
+		GameState.change_money(player.id, wager, "临淄闹市赌坊")
+		EventBus.toast.emit("%s 在 %s 赢了 %d 两" % [player.display_name, tile.display_name, wager], "good")
+	elif player_roll < house_roll:
+		GameState.change_money(player.id, -wager, "临淄闹市赌坊")
+		EventBus.toast.emit("%s 在 %s 输了 %d 两" % [player.display_name, tile.display_name, wager], "warn")
+	else:
+		EventBus.toast.emit("%s 在 %s 平局退筹" % [player.display_name, tile.display_name], "muted")
+
 func _scenic_reward(player) -> int:
 	var amount: int = 45 + GameState.current_round * 4
 	amount = int(round(float(amount) * (1.0 + float(player.attributes.get("fortune", 1)) * 0.03)))
@@ -310,17 +329,21 @@ func _temple_reward(player) -> int:
 # -----------------------------------------------------
 func get_city_stock(tile_index: int) -> Array:
 	if not _city_stocks.has(tile_index) or _city_stocks[tile_index].size() == 0:
-		_city_stocks[tile_index] = MarketSystemRef.roll_city_stock(GameState.rng)
+		var tile: Resource = GameState.tile_at(tile_index)
+		_city_stocks[tile_index] = MarketSystemRef.roll_city_stock(GameState.rng, tile.country if tile != null else "")
 	return _city_stocks[tile_index]
 
 func get_city_offers(tile_index: int) -> Array:
 	if not _city_offers.has(tile_index) or _city_offers[tile_index].size() == 0:
-		_city_offers[tile_index] = MarketSystemRef.roll_city_offers(GameState.rng, GameState.human_player(), GameState.city_visit_count(tile_index))
+		var tile: Resource = GameState.tile_at(tile_index)
+		var visit_bonus: int = max(GameState.city_visit_count(tile_index), GameState.region_visit_count_for_tile(tile))
+		_city_offers[tile_index] = MarketSystemRef.roll_city_offers(GameState.rng, GameState.human_player(), visit_bonus, tile.country if tile != null else "")
 	return _city_offers[tile_index]
 
 func get_bm_stock(tile_index: int) -> Array:
 	if not _bm_stocks.has(tile_index) or _bm_stocks[tile_index].size() == 0:
-		_bm_stocks[tile_index] = MarketSystemRef.roll_black_market_stock(GameState.rng)
+		var tile: Resource = GameState.tile_at(tile_index)
+		_bm_stocks[tile_index] = MarketSystemRef.roll_black_market_stock(GameState.rng, tile.country if tile != null else "")
 	return _bm_stocks[tile_index]
 
 ## 真人购买（CityDialog 内调用）；成功返回 true

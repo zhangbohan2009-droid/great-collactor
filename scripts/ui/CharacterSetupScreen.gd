@@ -8,6 +8,7 @@ var _name_edit: LineEdit
 var _selected_avatar := "collector_gold"
 var _selected_color := Color("#d4a843")
 var _selected_skill := ""
+var _skill_group: ButtonGroup
 
 func _init() -> void:
 	anchor_right = 1.0
@@ -29,7 +30,7 @@ func _build() -> void:
 	add_child(center)
 
 	var panel := Panel.new()
-	panel.custom_minimum_size = Vector2(760, 660)
+	panel.custom_minimum_size = Vector2(820, 720)
 	var psb := StyleBoxFlat.new()
 	psb.bg_color = Color("#24180f")
 	psb.border_color = Color("#d4a843")
@@ -63,11 +64,12 @@ func _build() -> void:
 	avatars.add_theme_constant_override("separation", 14)
 	root.add_child(avatars)
 	avatars.add_child(_avatar_btn("collector_gold", "金牌藏家", Color("#d4a843")))
-	avatars.add_child(_avatar_btn("jade_green", "玉器行家", Color("#4a8060")))
 	avatars.add_child(_avatar_btn("ink_blue", "掌眼先生", Color("#3a78a8")))
 	avatars.add_child(_avatar_btn("market_red", "市井掌柜", Color("#b03020")))
 
 	root.add_child(_label("初始技能", 18, Color("#f5e6c8")))
+	_skill_group = ButtonGroup.new()
+	_skill_group.allow_unpress = true
 	var skills := GridContainer.new()
 	skills.columns = 3
 	skills.add_theme_constant_override("h_separation", 10)
@@ -93,12 +95,42 @@ func _build() -> void:
 
 func _avatar_btn(id: String, text: String, color: Color) -> Button:
 	var b := _btn("", color)
-	b.custom_minimum_size = Vector2(96, 84)
+	b.custom_minimum_size = Vector2(158, 208)
 	b.tooltip_text = text
-	b.icon = GameConfig.get_avatar_texture(id, 64)
-	b.expand_icon = true
 	b.toggle_mode = true
 	b.button_pressed = id == _selected_avatar
+
+	var portrait := TextureRect.new()
+	portrait.texture = GameConfig.get_avatar_portrait_texture(id, Vector2i(142, 170))
+	portrait.anchor_right = 1.0
+	portrait.anchor_bottom = 1.0
+	portrait.offset_left = 8
+	portrait.offset_top = 8
+	portrait.offset_right = -8
+	portrait.offset_bottom = -30
+	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(portrait)
+
+	var name_lbl := Label.new()
+	name_lbl.text = text
+	name_lbl.anchor_top = 1.0
+	name_lbl.anchor_right = 1.0
+	name_lbl.anchor_bottom = 1.0
+	name_lbl.offset_left = 4
+	name_lbl.offset_top = -30
+	name_lbl.offset_right = -4
+	name_lbl.offset_bottom = -4
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_lbl.add_theme_font_size_override("font_size", 13)
+	name_lbl.add_theme_color_override("font_color", Color("#f5e6c8"))
+	name_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	name_lbl.add_theme_constant_override("outline_size", 2)
+	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(name_lbl)
+
 	b.pressed.connect(func():
 		_selected_avatar = id
 		_selected_color = color
@@ -110,6 +142,7 @@ func _skill_btn(skill: Dictionary) -> Button:
 	var b := _btn("%s\n%s" % [str(skill.get("name", id)), str(skill.get("desc", ""))], Color("#7da8d4"))
 	b.custom_minimum_size = Vector2(220, 76)
 	b.toggle_mode = true
+	b.button_group = _skill_group
 	b.pressed.connect(func():
 		_selected_skill = id if b.button_pressed else ""
 	)

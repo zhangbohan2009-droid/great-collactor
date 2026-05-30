@@ -9,10 +9,10 @@ const ItemsDBRef := preload("res://scripts/data/ItemsDB.gd")
 const ItemInstanceModel := preload("res://scripts/models/ItemInstance.gd")
 
 ## 创建一个拍卖会 session（dictionary 形态，便于 UI 直接读）
-## 拍品稀有度：第 4 回合 [3,3,4]；第 8 回合 [3,4,4]；第 12 回合 [4,4,4]
+## 拍品稀有度最低为稀奇。前两件会尽量选在多数玩家可竞争的资金区间内。
 const ROUND_LOT_RARITIES: Dictionary = {
-	4: [3, 3, 4],
-	8: [3, 4, 4],
+	4: [2, 3, 4],
+	8: [2, 3, 4],
 	12: [4, 4, 4],
 }
 
@@ -20,18 +20,15 @@ static func create_session(round_num: int, rng: RandomNumberGenerator) -> Dictio
 	var rarities: Array = ROUND_LOT_RARITIES.get(round_num, [3, 3, 4])
 	var lots: Array = []
 	var used_ids: Dictionary = {}
-	for r in rarities:
-		var item: Resource = null
-		# 避免一场里出现重复物
-		for attempt in range(8):
-			var candidate = ItemsDBRef.random_item_by_rarity(r, rng)
-			if candidate != null and not used_ids.has(candidate.id):
-				item = candidate
-				used_ids[candidate.id] = true
-				break
+	for lot_idx in range(rarities.size()):
+		var r: int = max(2, int(rarities[lot_idx]))
+		var item: Resource = _pick_competitive_item(r, lot_idx, used_ids, rng)
 		if item == null:
 			item = ItemsDBRef.random_item_by_rarity(r, rng)
 		var inst: Resource = _build_lot_instance(item, rng)
+		var start_bid: int = MarketSystemRef.auction_start_bid(inst, rng)
+		if lot_idx < 2:
+			start_bid = _competitive_start_bid(start_bid)
 		var ceilings: Dictionary = {}
 		# 给 AI 玩家算 ceiling（真人不算）
 		for p in GameState.players:
@@ -40,7 +37,7 @@ static func create_session(round_num: int, rng: RandomNumberGenerator) -> Dictio
 		lots.append({
 			"item": item,
 			"instance": inst,
-			"start_bid": MarketSystemRef.auction_start_bid(inst, rng),
+			"start_bid": start_bid,
 			"estimate": MarketSystemRef.auction_estimate(inst, rng),
 			"current_bid": 0,
 			"leader_id": -1,
@@ -56,6 +53,41 @@ static func create_session(round_num: int, rng: RandomNumberGenerator) -> Dictio
 		"current_lot": 0,
 		"finished": false,
 	}
+
+static func _pick_competitive_item(rarity: int, lot_idx: int, used_ids: Dictionary, rng: RandomNumberGenerator) -> Resource:
+	var fallback: Resource = null
+	for attempt in range(18):
+		var candidate = ItemsDBRef.random_item_by_rarity(rarity, rng)
+		if candidate == null or used_ids.has(candidate.id):
+			continue
+		if fallback == null:
+			fallback = candidate
+		if lot_idx >= 2 or _is_item_competitive(candidate, rarity):
+			used_ids[candidate.id] = true
+			return candidate
+	if fallback != null:
+		used_ids[fallback.id] = true
+	return fallback
+
+static func _is_item_competitive(item: Resource, rarity: int) -> bool:
+	var expected_value := float(item.base_price) * float(GameConfig.RARITY_PRICE_MULT[rarity])
+	var expected_start := expected_value * 0.24
+	return expected_start <= float(_competitive_budget()) * 0.72
+
+static func _competitive_budget() -> int:
+	var wallets: Array[int] = []
+	for p in GameState.players:
+		wallets.append(int(p.money))
+	if wallets.is_empty():
+		return GameConfig.START_MONEY
+	wallets.sort()
+	return int(wallets[wallets.size() / 2])
+
+static func _competitive_start_bid(raw_start: int) -> int:
+	var budget: int = _competitive_budget()
+	var cap: int = max(GameConfig.AUCTION_MIN_BID_STEP, int(floor(float(budget) * 0.55)))
+	var start: int = min(raw_start, cap)
+	return max(GameConfig.AUCTION_MIN_BID_STEP, int(floor(float(start) / float(GameConfig.AUCTION_MIN_BID_STEP))) * GameConfig.AUCTION_MIN_BID_STEP)
 
 static func _build_lot_instance(item: Resource, rng: RandomNumberGenerator) -> Resource:
 	# 拍卖场里基本都是真品

@@ -2,9 +2,10 @@ class_name MapTile
 extends Resource
 ## 地图格子
 
-enum Type { CITY, BLACK_MARKET, SCENIC, TEMPLE }
+enum Type { CITY, BLACK_MARKET, SCENIC, TEMPLE, GAMBLING }
 
 @export var index: int = 0
+@export var id: String = ""
 @export var type: Type = Type.CITY
 @export var display_name: String = ""
 @export var lat: float = 33.0
@@ -20,6 +21,7 @@ static func type_key(t: int) -> String:
 		Type.BLACK_MARKET: return "black_market"
 		Type.SCENIC: return "scenic"
 		Type.TEMPLE: return "temple"
+		Type.GAMBLING: return "gambling"
 		_: return "city"
 
 static func type_to_label(t: int) -> String:
@@ -28,6 +30,7 @@ static func type_to_label(t: int) -> String:
 		Type.BLACK_MARKET: return "黑"
 		Type.SCENIC: return "景"
 		Type.TEMPLE: return "寺"
+		Type.GAMBLING: return "赌"
 		_: return "?"
 
 func type_key_str() -> String:

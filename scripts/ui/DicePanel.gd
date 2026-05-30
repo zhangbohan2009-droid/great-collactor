@@ -3,12 +3,12 @@ extends Control
 
 var _dice_label: Label
 var _hint_label: Label
-var _roll_btn: Button
+var _dice_button: Button
 var _tool_box: VBoxContainer
 var _fixed_row: HBoxContainer
 
 func _init() -> void:
-	custom_minimum_size = Vector2(204, 354)
+	custom_minimum_size = Vector2(182, 328)
 
 func _ready() -> void:
 	_build()
@@ -31,7 +31,7 @@ func _build() -> void:
 	add_child(bg)
 
 	var v := VBoxContainer.new()
-	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.alignment = BoxContainer.ALIGNMENT_BEGIN
 	v.add_theme_constant_override("separation", 8)
 	v.anchor_right = 1.0
 	v.anchor_bottom = 1.0
@@ -48,45 +48,42 @@ func _build() -> void:
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(_hint_label)
 
-	# 骰子方块
-	var dice_box := Panel.new()
-	dice_box.custom_minimum_size = Vector2(66, 66)
+	_dice_button = Button.new()
+	_dice_button.text = ""
+	_dice_button.custom_minimum_size = Vector2(120, 120)
+	_dice_button.focus_mode = Control.FOCUS_NONE
 	var dsb := StyleBoxFlat.new()
 	dsb.bg_color = Color("#f5e6c8")
 	dsb.border_color = Color("#1f1610")
 	dsb.set_border_width_all(3)
-	dsb.set_corner_radius_all(8)
-	dice_box.add_theme_stylebox_override("panel", dsb)
+	dsb.set_corner_radius_all(14)
+	var hover_dsb := dsb.duplicate()
+	hover_dsb.bg_color = Color("#fff1d4")
+	var pressed_dsb := dsb.duplicate()
+	pressed_dsb.bg_color = Color("#d4a843")
+	var disabled_dsb := dsb.duplicate()
+	disabled_dsb.bg_color = Color("#8a7a62")
+	disabled_dsb.border_color = Color("#3a3028")
+	_dice_button.add_theme_stylebox_override("normal", dsb)
+	_dice_button.add_theme_stylebox_override("hover", hover_dsb)
+	_dice_button.add_theme_stylebox_override("pressed", pressed_dsb)
+	_dice_button.add_theme_stylebox_override("disabled", disabled_dsb)
+	_dice_button.pressed.connect(_on_roll_pressed)
 
 	_dice_label = Label.new()
 	_dice_label.text = "—"
-	_dice_label.add_theme_font_size_override("font_size", 34)
+	_dice_label.add_theme_font_size_override("font_size", 52)
 	_dice_label.add_theme_color_override("font_color", Color("#1f1610"))
 	_dice_label.anchor_right = 1.0
 	_dice_label.anchor_bottom = 1.0
 	_dice_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_dice_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	dice_box.add_child(_dice_label)
+	_dice_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dice_button.add_child(_dice_label)
 
 	var dice_center := CenterContainer.new()
-	dice_center.add_child(dice_box)
+	dice_center.add_child(_dice_button)
 	v.add_child(dice_center)
-
-	_roll_btn = Button.new()
-	_roll_btn.text = "掷骰"
-	_roll_btn.custom_minimum_size = Vector2(112, 36)
-	_roll_btn.add_theme_font_size_override("font_size", 16)
-	var bsb := StyleBoxFlat.new()
-	bsb.bg_color = Color("#d4a843").darkened(0.4)
-	bsb.border_color = Color("#d4a843")
-	bsb.set_border_width_all(2)
-	bsb.set_corner_radius_all(6)
-	_roll_btn.add_theme_stylebox_override("normal", bsb)
-	_roll_btn.add_theme_color_override("font_color", Color("#f5e6c8"))
-	_roll_btn.pressed.connect(_on_roll_pressed)
-	var roll_center := CenterContainer.new()
-	roll_center.add_child(_roll_btn)
-	v.add_child(roll_center)
 
 	_tool_box = VBoxContainer.new()
 	_tool_box.add_theme_constant_override("separation", 4)
@@ -100,13 +97,13 @@ func _build() -> void:
 func _refresh() -> void:
 	var phase: String = GameState.current_phase
 	var human = GameState.human_player()
-	_roll_btn.disabled = true
+	_dice_button.disabled = true
 	_refresh_tool_buttons()
 	match phase:
 		"dice":
 			if human != null and not human.ready:
 				_hint_label.text = "你的回合：掷骰"
-				_roll_btn.disabled = false
+				_dice_button.disabled = false
 				_dice_label.text = "?"
 			else:
 				_hint_label.text = "等待其他玩家掷骰…"
@@ -126,7 +123,7 @@ func _refresh() -> void:
 			_hint_label.text = "—"
 
 func _on_roll_pressed() -> void:
-	_roll_btn.disabled = true
+	_dice_button.disabled = true
 	GameFlow.roll_dice_for(GameConfig.HUMAN_PLAYER_ID)
 
 func _refresh_tool_buttons() -> void:

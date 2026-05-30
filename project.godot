@@ -27,6 +27,8 @@ EventBus="*res://scripts/autoload/EventBus.gd"
 GameState="*res://scripts/autoload/GameState.gd"
 GameFlow="*res://scripts/autoload/GameFlow.gd"
 SaveSystem="*res://scripts/autoload/SaveSystem.gd"
+UserSettings="*res://scripts/autoload/UserSettings.gd"
+AudioManager="*res://scripts/autoload/AudioManager.gd"
 
 [display]
 

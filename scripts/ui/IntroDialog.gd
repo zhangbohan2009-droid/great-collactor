@@ -9,11 +9,22 @@ func _init() -> void:
 
 func setup(type_key: String, first_time: bool) -> void:
 	var intro: Dictionary = GameConfig.TILE_INTROS.get(type_key, {})
+	set_meta("type_key", type_key)
+	setup_from_intro(intro, first_time)
+
+func setup_location(tile) -> void:
+	set_meta("type_key", "")
+	var intro := GameConfig.location_intro_for_tile(tile)
+	setup_from_intro(intro, false)
+
+func setup_from_intro(intro: Dictionary, first_time: bool) -> void:
 	var title_text: String = intro.get("title", "介绍")
 	var subtitle: String = intro.get("subtitle", "")
+	var region: String = intro.get("region", "")
 	var lines: Array = intro.get("lines", [])
+	var image_path: String = intro.get("image", "")
+	var credit: Dictionary = intro.get("image_credit", {})
 
-	set_meta("type_key", type_key)
 	title = title_text
 
 	# 清掉旧子节点（保险）
@@ -35,9 +46,15 @@ func setup(type_key: String, first_time: bool) -> void:
 	root.add_theme_stylebox_override("panel", pnl_sb)
 	add_child(root)
 
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(480, 0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 14)
-	root.add_child(vbox)
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(vbox)
 
 	# 标题
 	var title_lbl := Label.new()
@@ -53,6 +70,28 @@ func setup(type_key: String, first_time: bool) -> void:
 		sub_lbl.add_theme_font_size_override("font_size", 14)
 		sub_lbl.add_theme_color_override("font_color", Color("#7a5a30"))
 		vbox.add_child(sub_lbl)
+	if region != "":
+		var region_lbl := Label.new()
+		region_lbl.text = "区域：%s" % region
+		region_lbl.add_theme_font_size_override("font_size", 12)
+		region_lbl.add_theme_color_override("font_color", Color("#8a6840"))
+		vbox.add_child(region_lbl)
+
+	var image_tex := _load_intro_texture(image_path)
+	if image_tex != null:
+		var image := TextureRect.new()
+		image.texture = image_tex
+		image.custom_minimum_size = Vector2(480, 170)
+		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		vbox.add_child(image)
+		if not credit.is_empty():
+			var credit_lbl := Label.new()
+			credit_lbl.text = "图片：%s · %s" % [str(credit.get("author", "Unknown")), str(credit.get("license", ""))]
+			credit_lbl.add_theme_font_size_override("font_size", 11)
+			credit_lbl.add_theme_color_override("font_color", Color("#8a6840"))
+			credit_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			vbox.add_child(credit_lbl)
 
 	# 分隔
 	var sep := HSeparator.new()
@@ -90,3 +129,15 @@ func setup(type_key: String, first_time: bool) -> void:
 	ok_btn.custom_minimum_size = Vector2(120, 32)
 	ok_btn.pressed.connect(func(): close_requested.emit())
 	btn_row.add_child(ok_btn)
+
+func _load_intro_texture(path: String) -> Texture2D:
+	if path == "":
+		return null
+	if ResourceLoader.exists(path):
+		return load(path)
+	if not FileAccess.file_exists(path):
+		return null
+	var img := Image.new()
+	if img.load(path) != OK:
+		return null
+	return ImageTexture.create_from_image(img)

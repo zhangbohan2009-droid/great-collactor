@@ -7,6 +7,7 @@ const CityDialog := preload("res://scripts/ui/CityDialog.gd")
 const BlackMarketDialog := preload("res://scripts/ui/BlackMarketDialog.gd")
 const ScenicDialog := preload("res://scripts/ui/ScenicDialog.gd")
 const TempleDialog := preload("res://scripts/ui/TempleDialog.gd")
+const GamblingDialog := preload("res://scripts/ui/GamblingDialog.gd")
 const IntroDialog := preload("res://scripts/ui/IntroDialog.gd")
 const PlayerHUDUI := preload("res://scripts/ui/PlayerHUD.gd")
 const PlayersStatusBarUI := preload("res://scripts/ui/PlayersStatusBar.gd")
@@ -22,7 +23,7 @@ const NODE_CARD_SIZE := Vector2(108, 64)
 const TOKEN_SIZE := Vector2(38, 38)
 const CAM_LERP := 6.0
 const MAX_ZOOM_MULT := 4.0
-const MAP_EDGE_CROP_RATIO := 0.035
+const MAP_EDGE_CROP_RATIO := 0.06
 
 var _world: Node2D
 var _base_map: Sprite2D
@@ -42,6 +43,7 @@ var _map_size := Vector2(6144, 4589)
 var _min_zoom := 0.25
 var _max_zoom := 1.0
 var _dragging := false
+var _last_drag_mouse_pos := Vector2.ZERO
 var _follow_enabled := true
 var _cam_focus_player_id := GameConfig.HUMAN_PLAYER_ID
 
@@ -77,32 +79,74 @@ func _process(delta: float) -> void:
 	if _follow_enabled:
 		_tick_follow_camera(delta)
 
-func _gui_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if _handle_map_input(event):
-		accept_event()
-
-func _unhandled_input(event: InputEvent) -> void:
-	_handle_map_input(event)
+		get_viewport().set_input_as_handled()
 
 func _handle_map_input(event: InputEvent) -> bool:
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
-			_dragging = mb.pressed
 			if mb.pressed:
+				if _is_pointer_over_hud_control():
+					return false
+				if _try_open_marker_at_mouse():
+					_dragging = false
+					return true
+				_dragging = true
+				_last_drag_mouse_pos = mb.position
 				_disable_follow()
-			return true
+				return true
+			var was_dragging := _dragging
+			_dragging = false
+			return was_dragging
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			if _is_pointer_over_hud_control():
+				return false
 			_zoom_at_mouse(1.15)
 			return true
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			if _is_pointer_over_hud_control():
+				return false
 			_zoom_at_mouse(1.0 / 1.15)
 			return true
 	elif event is InputEventMouseMotion and _dragging:
 		var mm := event as InputEventMouseMotion
-		_camera.position -= mm.relative / _camera.zoom
+		var drag_delta := mm.position - _last_drag_mouse_pos
+		_last_drag_mouse_pos = mm.position
+		_camera.position -= drag_delta / _camera.zoom
 		_clamp_camera()
 		return true
+	return false
+
+func _is_pointer_over_hud_control() -> bool:
+	var hovered: Node = get_viewport().gui_get_hovered_control()
+	while hovered != null:
+		if hovered == _hud_root:
+			return true
+		hovered = hovered.get_parent()
+	return false
+
+func _try_open_marker_at_mouse() -> bool:
+	if _camera == null or _tile_pixel_pos.is_empty():
+		return false
+	var world_pos := _camera.get_global_mouse_position()
+	for i in range(GameState.map_tiles.size() - 1, -1, -1):
+		if i >= _tile_pixel_pos.size():
+			continue
+		var tile = GameState.map_tiles[i]
+		var base: Vector2 = _tile_pixel_pos[i]
+		if tile.type == MapTileModel.Type.CITY:
+			var card_rect := Rect2(base + tile.label_offset, NODE_CARD_SIZE)
+			var icon_rect := Rect2(base - Vector2(34, 34), Vector2(68, 68))
+			if card_rect.has_point(world_pos) or icon_rect.has_point(world_pos):
+				_open_location_intro(tile)
+				return true
+		else:
+			var poi_rect := Rect2(base - Vector2(38, 38), Vector2(76, 76))
+			if poi_rect.has_point(world_pos):
+				_open_location_intro(tile)
+				return true
 	return false
 
 func _on_viewport_resized() -> void:
@@ -118,6 +162,7 @@ func _build_ui() -> void:
 	_base_map = Sprite2D.new()
 	_base_map.texture = load(BASE_MAP_PATH)
 	_base_map.centered = false
+	_apply_base_map_crop()
 	_world.add_child(_base_map)
 
 	_regions_layer = Node2D.new()
@@ -140,6 +185,7 @@ func _build_ui() -> void:
 	_hud_root = Control.new()
 	_hud_root.anchor_right = 1.0
 	_hud_root.anchor_bottom = 1.0
+	_hud_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hud_layer.add_child(_hud_root)
 
 	_hud = PlayerHUDUI.new()
@@ -155,8 +201,8 @@ func _build_ui() -> void:
 	_dice_panel.anchor_top = 1.0
 	_dice_panel.anchor_right = 1.0
 	_dice_panel.anchor_bottom = 1.0
-	_dice_panel.offset_left = -226
-	_dice_panel.offset_top = -210
+	_dice_panel.offset_left = -248
+	_dice_panel.offset_top = -344
 	_dice_panel.offset_right = -66
 	_dice_panel.offset_bottom = -16
 
@@ -179,15 +225,29 @@ func _make_camera_current() -> void:
 	if _camera != null and _camera.is_inside_tree():
 		_camera.make_current()
 
+func _apply_base_map_crop() -> void:
+	var visible_rect: Rect2 = _map_visible_rect()
+	_base_map.region_enabled = true
+	_base_map.region_rect = visible_rect
+	_base_map.position = visible_rect.position
+
+func _map_visible_rect() -> Rect2:
+	var edge: float = min(_map_size.x, _map_size.y) * MAP_EDGE_CROP_RATIO
+	var size: Vector2 = Vector2(
+		max(1.0, _map_size.x - edge * 2.0),
+		max(1.0, _map_size.y - edge * 2.0)
+	)
+	return Rect2(Vector2(edge, edge), size)
+
 func _build_action_bar() -> void:
 	_action_bar = Panel.new()
 	_action_bar.anchor_left = 0.5
 	_action_bar.anchor_right = 0.5
 	_action_bar.anchor_top = 1.0
 	_action_bar.anchor_bottom = 1.0
-	_action_bar.offset_left = -270
+	_action_bar.offset_left = -340
 	_action_bar.offset_top = -70
-	_action_bar.offset_right = 270
+	_action_bar.offset_right = 340
 	_action_bar.offset_bottom = -16
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.08, 0.045, 0.025, 0.76)
@@ -212,9 +272,13 @@ func _build_action_bar() -> void:
 	profile_btn.pressed.connect(_open_profile_dialog)
 	row.add_child(profile_btn)
 
-	var inventory_btn := _make_action_button("▣ 背包")
-	inventory_btn.pressed.connect(_open_inventory_dialog)
-	row.add_child(inventory_btn)
+	var storage_btn := _make_action_button("▣ 仓库")
+	storage_btn.pressed.connect(_open_storage_dialog)
+	row.add_child(storage_btn)
+
+	var tools_btn := _make_action_button("✦ 道具")
+	tools_btn.pressed.connect(_open_tools_dialog)
+	row.add_child(tools_btn)
 
 	var ranking_btn := _make_action_button("♛ 排行榜")
 	ranking_btn.pressed.connect(_open_ranking_dialog)
@@ -289,8 +353,15 @@ func _build_attribution() -> void:
 func _open_profile_dialog() -> void:
 	_open_overlay_dialog(ProfileDialog.new())
 
-func _open_inventory_dialog() -> void:
-	_open_overlay_dialog(InventoryDialog.new())
+func _open_storage_dialog() -> void:
+	var dlg := InventoryDialog.new()
+	dlg.setup_mode("storage")
+	_open_overlay_dialog(dlg)
+
+func _open_tools_dialog() -> void:
+	var dlg := InventoryDialog.new()
+	dlg.setup_mode("tools")
+	_open_overlay_dialog(dlg)
 
 func _open_ranking_dialog() -> void:
 	_open_overlay_dialog(RankingDialog.new())
@@ -355,11 +426,72 @@ func _redraw_routes() -> void:
 	if _tile_pixel_pos.size() < 2:
 		return
 	for i in range(_tile_pixel_pos.size()):
-		var a: Vector2 = _tile_pixel_pos[i]
-		var b: Vector2 = _tile_pixel_pos[(i + 1) % _tile_pixel_pos.size()]
-		_add_line(a, b, 10.0, Color(0.12, 0.07, 0.03, 0.88))
-		_add_line(a, b, 5.0, Color(0.95, 0.72, 0.30, 0.96))
-		_add_route_dot((a + b) * 0.5)
+		var route_points := _route_points_for_indices(i, (i + 1) % _tile_pixel_pos.size())
+		_add_route_path(route_points)
+		_add_route_dot(_route_path_midpoint(route_points))
+
+func _route_points_for_indices(from_index: int, to_index: int) -> Array[Vector2]:
+	var points: Array[Vector2] = [_tile_pixel_pos[from_index]]
+	var from_tile = GameState.map_tiles[from_index]
+	var to_tile = GameState.map_tiles[to_index]
+	match "%s>%s" % [from_tile.id, to_tile.id]:
+		"chengdu>emei_temple":
+			points.append_array([
+				Vector2(2060, 2380),
+				Vector2(1960, 2500),
+			])
+		"emei_temple>zhongnan_mountain":
+			points.append_array([
+				Vector2(2220, 2700),
+				Vector2(2700, 2380),
+				Vector2(3060, 1900),
+			])
+		"yingdu>chengdu":
+			points.append_array([
+				Vector2(3440, 2720),
+				Vector2(2860, 2840),
+				Vector2(2340, 2660),
+			])
+	points.append(_tile_pixel_pos[to_index])
+	return points
+
+func _add_route_path(points: Array[Vector2]) -> void:
+	if points.size() < 2:
+		return
+	_add_polyline(points, 14.0, Color(0.09, 0.045, 0.02, 0.86))
+	_add_polyline(points, 8.0, Color("#8a5a24"))
+	_add_polyline(points, 3.0, Color(1.0, 0.82, 0.42, 0.98))
+
+func _add_polyline(points: Array[Vector2], width: float, color: Color) -> void:
+	var line := Line2D.new()
+	for p in points:
+		line.add_point(p)
+	line.width = width
+	line.default_color = color
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode = Line2D.LINE_CAP_ROUND
+	line.joint_mode = Line2D.LINE_JOINT_ROUND
+	_route_layer.add_child(line)
+
+func _route_path_midpoint(points: Array[Vector2]) -> Vector2:
+	if points.is_empty():
+		return Vector2.ZERO
+	var total_len := 0.0
+	for i in range(points.size() - 1):
+		total_len += points[i].distance_to(points[i + 1])
+	if total_len <= 0.0:
+		return points[0]
+	var target_len := total_len * 0.5
+	var walked := 0.0
+	for i in range(points.size() - 1):
+		var a: Vector2 = points[i]
+		var b: Vector2 = points[i + 1]
+		var seg_len := a.distance_to(b)
+		if walked + seg_len >= target_len:
+			var t := (target_len - walked) / seg_len
+			return a.lerp(b, t)
+		walked += seg_len
+	return points[points.size() - 1]
 
 func _add_line(a: Vector2, b: Vector2, width: float, color: Color) -> void:
 	var line := Line2D.new()
@@ -367,17 +499,20 @@ func _add_line(a: Vector2, b: Vector2, width: float, color: Color) -> void:
 	line.add_point(b)
 	line.width = width
 	line.default_color = color
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode = Line2D.LINE_CAP_ROUND
+	line.joint_mode = Line2D.LINE_JOINT_ROUND
 	_route_layer.add_child(line)
 
 func _add_route_dot(pos: Vector2) -> void:
 	var dot := Panel.new()
-	dot.size = Vector2(11, 11)
+	dot.size = Vector2(14, 14)
 	dot.position = pos - dot.size * 0.5
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.18, 0.12, 0.07, 0.95)
-	sb.border_color = Color("#f5e6c8")
-	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(6)
+	sb.bg_color = Color("#f5e6c8")
+	sb.border_color = Color("#6b4828")
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(7)
 	dot.add_theme_stylebox_override("panel", sb)
 	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_route_layer.add_child(dot)
@@ -418,10 +553,26 @@ func _make_node_marker(tile) -> CanvasItem:
 		return _make_flat_poi_icon(tile)
 	return _make_city_card(tile)
 
+func _make_marker_button(tile, marker_size: Vector2) -> Button:
+	var btn := Button.new()
+	btn.text = ""
+	btn.size = marker_size
+	btn.custom_minimum_size = marker_size
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.tooltip_text = "查看 %s 介绍" % tile.display_name
+	btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	var blank := StyleBoxEmpty.new()
+	btn.add_theme_stylebox_override("normal", blank)
+	btn.add_theme_stylebox_override("hover", blank)
+	btn.add_theme_stylebox_override("pressed", blank)
+	btn.add_theme_stylebox_override("disabled", blank)
+	btn.mouse_entered.connect(func(): btn.modulate = Color(1.08, 1.08, 1.08, 1.0))
+	btn.mouse_exited.connect(func(): btn.modulate = Color.WHITE)
+	btn.pressed.connect(func(): _open_location_intro(tile))
+	return btn
+
 func _make_city_path_icon(tile) -> Control:
-	var root := Control.new()
-	root.size = Vector2(50, 50)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var root := _make_marker_button(tile, Vector2(50, 50))
 	var base := Panel.new()
 	base.size = root.size
 	var sb := StyleBoxFlat.new()
@@ -457,11 +608,10 @@ func _make_city_path_icon(tile) -> Control:
 	root.add_child(lbl)
 	return root
 
-func _make_city_card(tile) -> Panel:
-	var card := Panel.new()
+func _make_city_card(tile) -> Button:
+	var card := _make_marker_button(tile, NODE_CARD_SIZE)
 	card.custom_minimum_size = NODE_CARD_SIZE
 	card.size = NODE_CARD_SIZE
-	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.97, 0.90, 0.76, 0.95)
 	sb.border_color = Color("#6b4828")
@@ -470,69 +620,25 @@ func _make_city_card(tile) -> Panel:
 	sb.shadow_color = Color(0.1, 0.06, 0.04, 0.5)
 	sb.shadow_size = 3
 	sb.shadow_offset = Vector2(2, 2)
-	card.add_theme_stylebox_override("panel", sb)
-
-	var pedestal := Panel.new()
-	pedestal.size = Vector2(42, 24)
-	pedestal.position = Vector2((NODE_CARD_SIZE.x - pedestal.size.x) * 0.5, NODE_CARD_SIZE.y - 10)
-	var psb := StyleBoxFlat.new()
-	psb.bg_color = tile.color().darkened(0.20)
-	psb.border_color = Color("#1f1610")
-	psb.set_border_width_all(2)
-	psb.set_corner_radius_all(12)
-	pedestal.add_theme_stylebox_override("panel", psb)
-	pedestal.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.add_child(pedestal)
-	var plbl := Label.new()
-	plbl.text = "城"
-	plbl.anchor_right = 1.0
-	plbl.anchor_bottom = 1.0
-	plbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	plbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	plbl.add_theme_font_size_override("font_size", 13)
-	plbl.add_theme_color_override("font_color", Color("#f5e6c8"))
-	plbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	plbl.add_theme_constant_override("outline_size", 2)
-	pedestal.add_child(plbl)
-
-	var hbox := HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 6)
-	hbox.anchor_right = 1.0
-	hbox.anchor_bottom = 1.0
-	hbox.offset_left = 6
-	hbox.offset_top = 4
-	hbox.offset_right = -6
-	hbox.offset_bottom = -4
-	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.add_child(hbox)
-
-	var badge := Panel.new()
-	badge.custom_minimum_size = Vector2(28, 28)
-	var bsb := StyleBoxFlat.new()
-	bsb.bg_color = tile.color()
-	bsb.border_color = Color("#1f1610")
-	bsb.set_border_width_all(1)
-	bsb.set_corner_radius_all(3)
-	badge.add_theme_stylebox_override("panel", bsb)
-	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hbox.add_child(badge)
-
-	var blbl := Label.new()
-	blbl.text = tile.type_label()
-	blbl.add_theme_font_size_override("font_size", 16)
-	blbl.add_theme_color_override("font_color", Color("#f5e6c8"))
-	blbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-	blbl.add_theme_constant_override("outline_size", 2)
-	blbl.size = Vector2(28, 28)
-	blbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	blbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	blbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	badge.add_child(blbl)
+	card.add_theme_stylebox_override("normal", sb)
+	var hover_sb := sb.duplicate()
+	hover_sb.bg_color = Color(1.0, 0.94, 0.80, 0.98)
+	card.add_theme_stylebox_override("hover", hover_sb)
+	var pressed_sb := sb.duplicate()
+	pressed_sb.bg_color = Color("#d4a843")
+	card.add_theme_stylebox_override("pressed", pressed_sb)
 
 	var vbox := VBoxContainer.new()
-	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.anchor_right = 1.0
+	vbox.anchor_bottom = 1.0
+	vbox.offset_left = 8
+	vbox.offset_top = 8
+	vbox.offset_right = -8
+	vbox.offset_bottom = -8
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 2)
 	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hbox.add_child(vbox)
+	card.add_child(vbox)
 
 	var display_text: String = tile.display_name
 	var dot_idx := display_text.find(" · ")
@@ -540,24 +646,24 @@ func _make_city_card(tile) -> Panel:
 		display_text = display_text.substr(0, dot_idx)
 	var name_lbl := Label.new()
 	name_lbl.text = display_text
-	name_lbl.add_theme_font_size_override("font_size", 15)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.add_theme_font_size_override("font_size", 17)
 	name_lbl.add_theme_color_override("font_color", Color("#2a1810"))
 	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(name_lbl)
 
 	var sub_lbl := Label.new()
-	sub_lbl.text = tile.country if tile.country != "" else tile.ohm_source
+	sub_lbl.text = "所属势力：%s" % (tile.country if tile.country != "" else "无")
 	sub_lbl.tooltip_text = tile.ohm_source
-	sub_lbl.add_theme_font_size_override("font_size", 10)
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.add_theme_font_size_override("font_size", 12)
 	sub_lbl.add_theme_color_override("font_color", Color(0.32, 0.20, 0.12, 0.78))
 	sub_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(sub_lbl)
 	return card
 
 func _make_flat_poi_icon(tile) -> Control:
-	var root := Control.new()
-	root.size = Vector2(46, 46)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var root := _make_marker_button(tile, Vector2(56, 56))
 	var color: Color = tile.color()
 	match tile.type:
 		MapTileModel.Type.BLACK_MARKET:
@@ -567,50 +673,96 @@ func _make_flat_poi_icon(tile) -> Control:
 			sb.bg_color = color.darkened(0.12)
 			sb.border_color = Color("#f5e6c8")
 			sb.set_border_width_all(2)
-			sb.set_corner_radius_all(23)
+			sb.set_corner_radius_all(28)
 			circle.add_theme_stylebox_override("panel", sb)
 			circle.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			root.add_child(circle)
 		MapTileModel.Type.SCENIC:
-			var diamond := Panel.new()
-			diamond.size = Vector2(34, 34)
-			diamond.position = Vector2(6, 6)
-			diamond.rotation = PI / 4.0
+			var shadow := Panel.new()
+			shadow.size = Vector2(48, 48)
+			shadow.position = Vector2(6, 7)
+			var shadow_sb := StyleBoxFlat.new()
+			shadow_sb.bg_color = Color(0, 0, 0, 0.28)
+			shadow_sb.set_corner_radius_all(24)
+			shadow.add_theme_stylebox_override("panel", shadow_sb)
+			shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			root.add_child(shadow)
+			var badge := Panel.new()
+			badge.size = Vector2(48, 48)
+			badge.position = Vector2(4, 3)
 			var dsb := StyleBoxFlat.new()
-			dsb.bg_color = color.darkened(0.1)
+			dsb.bg_color = Color("#355f43")
 			dsb.border_color = Color("#f5e6c8")
-			dsb.set_border_width_all(2)
-			dsb.set_corner_radius_all(5)
-			diamond.add_theme_stylebox_override("panel", dsb)
-			diamond.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			root.add_child(diamond)
+			dsb.set_border_width_all(3)
+			dsb.set_corner_radius_all(24)
+			badge.add_theme_stylebox_override("panel", dsb)
+			badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			root.add_child(badge)
+			var far_mountain := Polygon2D.new()
+			far_mountain.polygon = PackedVector2Array([Vector2(10, 35), Vector2(24, 16), Vector2(38, 35)])
+			far_mountain.color = Color("#9bd47a")
+			root.add_child(far_mountain)
+			var near_mountain := Polygon2D.new()
+			near_mountain.polygon = PackedVector2Array([Vector2(18, 37), Vector2(34, 18), Vector2(48, 37)])
+			near_mountain.color = Color("#f5e6c8")
+			root.add_child(near_mountain)
+			var ground := Line2D.new()
+			ground.add_point(Vector2(12, 38))
+			ground.add_point(Vector2(44, 38))
+			ground.width = 3
+			ground.default_color = Color("#24402e")
+			root.add_child(ground)
 		MapTileModel.Type.TEMPLE:
 			var tri := Polygon2D.new()
-			tri.polygon = PackedVector2Array([Vector2(23, 4), Vector2(42, 39), Vector2(4, 39)])
+			tri.polygon = PackedVector2Array([Vector2(28, 6), Vector2(48, 45), Vector2(8, 45)])
 			tri.color = color.darkened(0.1)
 			root.add_child(tri)
 			var outline := Line2D.new()
-			outline.add_point(Vector2(23, 4))
-			outline.add_point(Vector2(42, 39))
-			outline.add_point(Vector2(4, 39))
-			outline.add_point(Vector2(23, 4))
+			outline.add_point(Vector2(28, 6))
+			outline.add_point(Vector2(48, 45))
+			outline.add_point(Vector2(8, 45))
+			outline.add_point(Vector2(28, 6))
 			outline.width = 2
 			outline.default_color = Color("#f5e6c8")
 			root.add_child(outline)
+		MapTileModel.Type.GAMBLING:
+			var base := Panel.new()
+			base.size = root.size
+			var sb := StyleBoxFlat.new()
+			sb.bg_color = color.darkened(0.08)
+			sb.border_color = Color("#f5e6c8")
+			sb.set_border_width_all(3)
+			sb.set_corner_radius_all(10)
+			base.add_theme_stylebox_override("panel", sb)
+			base.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			root.add_child(base)
+			var inset := Panel.new()
+			inset.size = Vector2(34, 34)
+			inset.position = Vector2(11, 11)
+			var isb := StyleBoxFlat.new()
+			isb.bg_color = Color("#2a1810")
+			isb.border_color = Color("#d4a843")
+			isb.set_border_width_all(2)
+			isb.set_corner_radius_all(17)
+			inset.add_theme_stylebox_override("panel", isb)
+			inset.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			root.add_child(inset)
 		_:
 			var p := Panel.new()
 			p.size = root.size
 			root.add_child(p)
 	var lbl := Label.new()
-	lbl.text = tile.type_label()
+	lbl.text = "山" if tile.type == MapTileModel.Type.SCENIC else tile.type_label()
 	lbl.anchor_right = 1.0
 	lbl.anchor_bottom = 1.0
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl.add_theme_font_size_override("font_size", 18)
+	lbl.add_theme_font_size_override("font_size", 15 if tile.type == MapTileModel.Type.SCENIC else 18)
 	lbl.add_theme_color_override("font_color", Color("#f5e6c8"))
 	lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	lbl.add_theme_constant_override("outline_size", 2)
+	if tile.type == MapTileModel.Type.SCENIC:
+		lbl.offset_top = 20
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(lbl)
 	return root
@@ -690,7 +842,8 @@ func _update_zoom_limits() -> void:
 	var vp := get_viewport_rect().size
 	if vp == Vector2.ZERO:
 		return
-	var cover_zoom: float = max(vp.x / _map_size.x, vp.y / _map_size.y) * 1.08
+	var visible_rect: Rect2 = _map_visible_rect()
+	var cover_zoom: float = max(vp.x / visible_rect.size.x, vp.y / visible_rect.size.y) * 1.04
 	var content_zoom: float = _fit_interactive_zoom(vp)
 	_min_zoom = clampf(min(max(cover_zoom, 0.15), content_zoom), 0.15, 1.0)
 	_max_zoom = _min_zoom * MAX_ZOOM_MULT
@@ -722,11 +875,11 @@ func _clamp_camera() -> void:
 	if vp == Vector2.ZERO:
 		return
 	var half := vp * 0.5 / _camera.zoom
-	var edge: float = min(_map_size.x, _map_size.y) * MAP_EDGE_CROP_RATIO
-	var min_pos := half + Vector2(edge, edge)
-	var max_pos := _map_size - half - Vector2(edge, edge)
-	_camera.position.x = _map_size.x * 0.5 if min_pos.x > max_pos.x else clampf(_camera.position.x, min_pos.x, max_pos.x)
-	_camera.position.y = _map_size.y * 0.5 if min_pos.y > max_pos.y else clampf(_camera.position.y, min_pos.y, max_pos.y)
+	var visible_rect: Rect2 = _map_visible_rect()
+	var min_pos: Vector2 = visible_rect.position + half
+	var max_pos: Vector2 = visible_rect.end - half
+	_camera.position.x = visible_rect.get_center().x if min_pos.x > max_pos.x else clampf(_camera.position.x, min_pos.x, max_pos.x)
+	_camera.position.y = visible_rect.get_center().y if min_pos.y > max_pos.y else clampf(_camera.position.y, min_pos.y, max_pos.y)
 
 func _tick_follow_camera(delta: float) -> void:
 	var target := _camera_target_for(_cam_focus_player_id)
@@ -781,7 +934,7 @@ func _on_player_moved(player_id: int, from_index: int, to_index: int) -> void:
 	if from_index == to_index:
 		path.append(to_index)
 	else:
-		var n := GameConfig.TOTAL_TILES
+		var n := GameState.map_tiles.size() if not GameState.map_tiles.is_empty() else GameConfig.TOTAL_TILES
 		var direction := GameFlow.get_last_move_direction(player_id)
 		var i := from_index
 		while i != to_index:
@@ -799,8 +952,49 @@ func _on_player_moved(player_id: int, from_index: int, to_index: int) -> void:
 	tween.tween_callback(func():
 		if _follow_enabled:
 			_cam_focus_player_id = GameConfig.HUMAN_PLAYER_ID
+		_show_region_visit_bonus(player_id, to_index)
 		GameState.mark_player_ready(player_id)
 	)
+
+func _show_region_visit_bonus(player_id: int, tile_index: int) -> void:
+	var tile = GameState.tile_at(tile_index)
+	if tile == null:
+		return
+	var count := GameState.mark_region_visited(tile)
+	if count <= 0 or tile_index < 0 or tile_index >= _tile_pixel_pos.size():
+		return
+	var label_text := "%s +%d" % [_region_display_name(tile), count]
+	var color := _region_bonus_color(count)
+	var label := Label.new()
+	label.text = label_text
+	label.add_theme_font_size_override("font_size", 22 if player_id == GameConfig.HUMAN_PLAYER_ID else 18)
+	label.add_theme_color_override("font_color", color)
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.88))
+	label.add_theme_constant_override("outline_size", 4)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.position = _tile_pixel_pos[tile_index] + Vector2(-58, -88 - player_id * 18)
+	label.size = Vector2(116, 30)
+	label.z_index = 300
+	_nodes_layer.add_child(label)
+	var tween := create_tween()
+	tween.tween_property(label, "position:y", label.position.y - 42, 0.85).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.85).set_delay(0.25)
+	tween.tween_callback(label.queue_free)
+
+func _region_display_name(tile) -> String:
+	var country := str(tile.country)
+	if country != "":
+		return country
+	return str(tile.display_name)
+
+func _region_bonus_color(count: int) -> Color:
+	if count <= 1:
+		return Color("#9bd47a")
+	if count == 2:
+		return Color("#7da8d4")
+	if count == 3:
+		return Color("#d4a843")
+	return Color("#ff8a4a")
 
 func _on_tile_event_started(player_id: int, tile_index: int) -> void:
 	if player_id != GameConfig.HUMAN_PLAYER_ID:
@@ -840,13 +1034,17 @@ func _open_event_dialog_for_tile(tile) -> void:
 			var d4 := TempleDialog.new()
 			d4.setup(tile)
 			dlg = d4
+		MapTileModel.Type.GAMBLING:
+			var d5 := GamblingDialog.new()
+			d5.setup(tile)
+			dlg = d5
 	if dlg == null:
 		GameFlow.human_finish_tile_event()
 		return
 	_active_dialog = dlg
 	dlg.close_requested.connect(_on_dialog_closed)
 	if dlg.has_method("set_intro_callback"):
-		dlg.set_intro_callback(Callable(self, "_on_show_intro_again").bind(tile.type_key_str()))
+		dlg.set_intro_callback(Callable(self, "_open_tutorial_overlay").bind(tile.type_key_str()))
 	add_child(dlg)
 	dlg.popup_centered()
 
@@ -855,6 +1053,20 @@ func _on_dialog_closed() -> void:
 		_active_dialog.queue_free()
 		_active_dialog = null
 	GameFlow.human_finish_tile_event()
+
+func _open_location_intro(tile) -> void:
+	if tile == null:
+		return
+	if _active_dialog != null:
+		_active_dialog.queue_free()
+		_active_dialog = null
+	_pending_tile_index = -1
+	var dlg := IntroDialog.new()
+	dlg.setup_location(tile)
+	dlg.close_requested.connect(_on_intro_closed_review)
+	_active_dialog = dlg
+	add_child(dlg)
+	dlg.popup_centered()
 
 func _open_intro_dialog(type_key: String, first_time: bool) -> void:
 	var dlg := IntroDialog.new()
@@ -892,16 +1104,12 @@ func _on_intro_closed_review() -> void:
 		if tile != null:
 			_open_event_dialog_for_tile(tile)
 
-func _on_show_intro_again(type_key: String) -> void:
-	if _active_dialog != null:
-		_pending_tile_index = -1
-		var human = GameState.human_player()
-		if human != null:
-			for i in range(GameState.map_tiles.size()):
-				var t = GameState.map_tiles[i]
-				if t.type_key_str() == type_key and human.position == i:
-					_pending_tile_index = i
-					break
-		_active_dialog.queue_free()
-		_active_dialog = null
-	_open_intro_dialog(type_key, false)
+func _open_tutorial_overlay(type_key: String) -> void:
+	var dlg := IntroDialog.new()
+	dlg.setup(type_key, false)
+	dlg.close_requested.connect(func():
+		if is_instance_valid(dlg):
+			dlg.queue_free()
+	)
+	add_child(dlg)
+	dlg.popup_centered()

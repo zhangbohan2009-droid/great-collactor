@@ -5,6 +5,10 @@ const ItemsDBRef := preload("res://scripts/data/ItemsDB.gd")
 
 var _tabs: TabContainer
 var _cn_font: SystemFont
+var _view_mode: String = "all"
+
+func setup_mode(value: String) -> void:
+	_view_mode = value
 
 func _init() -> void:
 	title = "背包"
@@ -24,6 +28,13 @@ func _ready() -> void:
 	EventBus.tool_used.connect(func(_player_id, _tool_id): _refresh())
 
 func _build() -> void:
+	match _view_mode:
+		"storage":
+			title = "仓库"
+		"tools":
+			title = "道具"
+		_:
+			title = "背包"
 	var bg := ColorRect.new()
 	bg.color = Color("#100a06")
 	bg.anchor_right = 1.0
@@ -44,9 +55,16 @@ func _refresh() -> void:
 	for c in _tabs.get_children():
 		_tabs.remove_child(c)
 		c.queue_free()
-	_tabs.add_child(_artifact_page())
-	_tabs.add_child(_tools_page())
-	_tabs.add_child(_codex_page())
+	match _view_mode:
+		"storage":
+			_tabs.add_child(_artifact_page())
+			_tabs.add_child(_codex_page())
+		"tools":
+			_tabs.add_child(_tools_page())
+		_:
+			_tabs.add_child(_artifact_page())
+			_tabs.add_child(_tools_page())
+			_tabs.add_child(_codex_page())
 
 func _artifact_page() -> ScrollContainer:
 	var scroll := ScrollContainer.new()
@@ -69,16 +87,19 @@ func _artifact_page() -> ScrollContainer:
 func _tools_page() -> ScrollContainer:
 	var scroll := ScrollContainer.new()
 	scroll.name = "道具"
-	var v := VBoxContainer.new()
-	v.add_theme_constant_override("separation", 10)
-	scroll.add_child(v)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 12)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(grid)
 	var p = GameState.human_player()
 	if p == null:
 		return scroll
 	for tool in GameConfig.TOOL_DEFS:
 		var id := str(tool.get("id", ""))
-		var count := int(p.tools.get(id, 0))
-		v.add_child(_tool_card(tool, count))
+		var count := GameState.tool_count(p.id, id)
+		grid.add_child(_tool_card(tool, count))
 	return scroll
 
 func _codex_page() -> ScrollContainer:
@@ -135,24 +156,42 @@ func _tool_card(tool: Dictionary, count: int) -> Panel:
 	var desc := str(tool.get("desc", ""))
 	var category := str(tool.get("category", "道具"))
 	var timing := str(tool.get("timing", ""))
-	var panel := _base_panel(Color("#7da8d4"))
-	panel.custom_minimum_size = Vector2(0, 106)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 10)
-	h.anchor_right = 1.0
-	h.anchor_bottom = 1.0
-	h.offset_left = 10
-	h.offset_top = 8
-	h.offset_right = -10
-	h.offset_bottom = -8
-	panel.add_child(h)
+	var color := _tool_color(id)
+	var panel := _base_panel(color if count > 0 else Color("#4d4438"))
+	panel.custom_minimum_size = Vector2(360, 150)
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
 	var v := VBoxContainer.new()
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_theme_constant_override("separation", 4)
-	h.add_child(v)
-	v.add_child(_label("%s x%d" % [name, count], 17, Color("#f5e6c8")))
-	v.add_child(_label("%s · %s" % [category, timing], 12, Color("#d4a843")))
-	v.add_child(_label(desc, 13, Color("#a89a82")))
+	v.add_theme_constant_override("separation", 8)
+	v.anchor_right = 1.0
+	v.anchor_bottom = 1.0
+	v.offset_left = 12
+	v.offset_top = 10
+	v.offset_right = -12
+	v.offset_bottom = -10
+	panel.add_child(v)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 8)
+	v.add_child(header)
+	var name_lbl := _label(name, 17, Color("#f5e6c8") if count > 0 else Color("#7d6a4a"))
+	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(name_lbl)
+	var count_text := "∞" if GameState.is_journey_mode() else "x%d" % count
+	var count_lbl := _label(count_text, 18, color if count > 0 else Color("#7d6a4a"))
+	count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	header.add_child(count_lbl)
+
+	var meta := _label("%s / %s" % [category, timing], 12, color if count > 0 else Color("#7d6a4a"))
+	v.add_child(meta)
+	var desc_lbl := _label(desc, 12, Color("#a89a82") if count > 0 else Color("#6f6255"))
+	desc_lbl.custom_minimum_size = Vector2(0, 42)
+	v.add_child(desc_lbl)
+
+	var bottom := HBoxContainer.new()
+	bottom.alignment = BoxContainer.ALIGNMENT_END
+	v.add_child(bottom)
 	var action := Button.new()
 	action.custom_minimum_size = Vector2(116, 34)
 	action.add_theme_font_override("font", _cn_font)
@@ -164,8 +203,27 @@ func _tool_card(tool: Dictionary, count: int) -> Panel:
 		if GameFlow.use_dice_tool(GameConfig.HUMAN_PLAYER_ID, id):
 			_refresh()
 	)
-	h.add_child(action)
+	bottom.add_child(action)
 	return panel
+
+func _tool_color(tool_id: String) -> Color:
+	match tool_id:
+		"fixed_dice_card":
+			return Color("#d4a843")
+		"reverse_card":
+			return Color("#c89aff")
+		"small_step_card":
+			return Color("#9bd47a")
+		"double_step_card":
+			return Color("#d4843a")
+		"safe_pass_card", "relic_guard_card":
+			return Color("#7da8d4")
+		"appraisal_coupon":
+			return Color("#e6b86a")
+		"market_peek_card", "auction_hint_card":
+			return Color("#8ecae6")
+		_:
+			return Color("#7da8d4")
 
 func _tool_action_text(tool_id: String) -> String:
 	if GameConfig.MOVEMENT_TOOL_IDS.has(tool_id):

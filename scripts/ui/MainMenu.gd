@@ -3,6 +3,7 @@ extends Control
 
 signal new_game_requested()
 signal continue_requested()
+signal codex_requested()
 signal settings_requested()
 signal quit_requested()
 
@@ -20,6 +21,7 @@ const BTN_GREY_RPG_PRESSED := RPG_UI + "buttonLong_grey_pressed.png"
 const ICON_CIRCLE_BEIGE := RPG_UI + "iconCircle_beige.png"
 const ARROW_BROWN_LEFT := RPG_UI + "arrowBrown_left.png"
 const ARROW_BROWN_RIGHT := RPG_UI + "arrowBrown_right.png"
+const MAIN_MENU_KEY_ART := "res://assets/art/key/main_menu_key_art.png"
 
 func _init() -> void:
 	anchor_right = 1.0
@@ -34,6 +36,19 @@ func _build_ui() -> void:
 	bg.color = Color("#17100c")
 	_fill_parent(bg)
 	add_child(bg)
+
+	var key_art := TextureRect.new()
+	key_art.texture = _load_png_texture(MAIN_MENU_KEY_ART)
+	key_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	key_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	key_art.modulate = Color(0.88, 0.82, 0.72, 1.0)
+	_fill_parent(key_art)
+	add_child(key_art)
+
+	var art_shade := ColorRect.new()
+	art_shade.color = Color(0.05, 0.025, 0.012, 0.48)
+	_fill_parent(art_shade)
+	add_child(art_shade)
 
 	var warm_glow := ColorRect.new()
 	warm_glow.color = Color(0.58, 0.33, 0.12, 0.14)
@@ -58,21 +73,12 @@ func _build_ui() -> void:
 
 	var frame := PanelContainer.new()
 	frame.custom_minimum_size = Vector2(600, 710)
-	frame.add_theme_stylebox_override("panel", _make_texture_style(PANEL_BROWN, 28, 32))
+	frame.add_theme_stylebox_override("panel", _make_glass_style())
 	center.add_child(frame)
 
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 16)
 	frame.add_child(box)
-
-	var crest := HBoxContainer.new()
-	crest.alignment = BoxContainer.ALIGNMENT_CENTER
-	crest.add_theme_constant_override("separation", 12)
-	box.add_child(crest)
-
-	crest.add_child(_make_icon(ARROW_BROWN_LEFT, Vector2(42, 42)))
-	crest.add_child(_make_icon(ICON_CIRCLE_BEIGE, Vector2(34, 34)))
-	crest.add_child(_make_icon(ARROW_BROWN_RIGHT, Vector2(42, 42)))
 
 	var title := Label.new()
 	title.text = "大 收 藏 家"
@@ -83,13 +89,6 @@ func _build_ui() -> void:
 	title.add_theme_constant_override("shadow_offset_y", 4)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
-
-	var sub := Label.new()
-	sub.text = "多人大富翁式 · 古董交易 MVP"
-	sub.add_theme_font_size_override("font_size", 18)
-	sub.add_theme_color_override("font_color", Color("#ead5ae"))
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(sub)
 
 	var rule := HSeparator.new()
 	rule.add_theme_color_override("separator", Color("#8f5a2b"))
@@ -105,6 +104,11 @@ func _build_ui() -> void:
 	btn_continue.pressed.connect(func(): continue_requested.emit())
 	box.add_child(btn_continue)
 
+	var btn_codex := _make_btn("图 鉴", Color("#d4a843"), BTN_BEIGE, BTN_BEIGE_PRESSED)
+	btn_codex.tooltip_text = "查看所有已接入藏品，按稀有度和时代筛选"
+	btn_codex.pressed.connect(func(): codex_requested.emit())
+	box.add_child(btn_codex)
+
 	var btn_settings := _make_btn("设 置", Color("#7da8d4"), BTN_BLUE_RPG, BTN_BLUE_RPG_PRESSED)
 	btn_settings.pressed.connect(func(): settings_requested.emit())
 	box.add_child(btn_settings)
@@ -112,23 +116,6 @@ func _build_ui() -> void:
 	var btn_quit := _make_btn("退 出", Color("#7d6a4a"), BTN_GREY_RPG, BTN_GREY_RPG_PRESSED)
 	btn_quit.pressed.connect(func(): quit_requested.emit())
 	box.add_child(btn_quit)
-
-	var chips := HBoxContainer.new()
-	chips.alignment = BoxContainer.ALIGNMENT_CENTER
-	chips.add_theme_constant_override("separation", 10)
-	box.add_child(chips)
-	chips.add_child(_make_chip("1 真人"))
-	chips.add_child(_make_chip("2 AI"))
-	chips.add_child(_make_chip("12 回合"))
-
-	var hint := Label.new()
-	hint.text = "第 4 / 8 / 12 回合开启拍卖，收藏、交易并冲击最终资产排名"
-	hint.add_theme_font_size_override("font_size", 14)
-	hint.add_theme_color_override("font_color", Color("#f0d7ad"))
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_stylebox_override("normal", _make_texture_style(PANEL_INSET_BROWN, 14, 14))
-	box.add_child(hint)
 
 func _make_btn(text: String, color: Color, texture_path: String = "", pressed_texture_path: String = "") -> Button:
 	var b := Button.new()
@@ -183,6 +170,27 @@ func _make_texture_style(texture_path: String, texture_margin: int, content_marg
 	style.set_texture_margin_all(texture_margin)
 	style.set_content_margin_all(content_margin)
 	return style
+
+func _make_glass_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.95, 0.82, 0.58, 0.18)
+	style.border_color = Color(1.0, 0.86, 0.54, 0.48)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(30)
+	style.content_margin_left = 34
+	style.content_margin_right = 34
+	style.content_margin_top = 30
+	style.content_margin_bottom = 30
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.34)
+	style.shadow_size = 18
+	style.shadow_offset = Vector2(0, 8)
+	return style
+
+func _load_png_texture(path: String) -> Texture2D:
+	var img := Image.new()
+	if img.load(path) != OK:
+		return null
+	return ImageTexture.create_from_image(img)
 
 func _make_icon(texture_path: String, size: Vector2) -> TextureRect:
 	var icon := TextureRect.new()

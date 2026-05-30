@@ -2,6 +2,7 @@ extends Control
 ## 地图选择：当前地图 + 占位地图，选择单人模式进入角色配置。
 
 signal single_player_requested(map_id: String)
+signal journey_mode_requested(map_id: String)
 signal back_requested()
 
 const MAP_THUMB := "res://assets/map/base_rumsey.png"
@@ -138,10 +139,19 @@ func _map_card(data: Dictionary) -> Panel:
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	v.add_child(spacer)
 
+	var mode_row := HBoxContainer.new()
+	mode_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	mode_row.add_theme_constant_override("separation", 12)
+	v.add_child(mode_row)
+	var journey := _btn("旅途模式", Color("#9bd47a"))
+	journey.disabled = not enabled
+	journey.tooltip_text = "轻松游玩：技能卡无限使用，开局 10000 两"
+	journey.pressed.connect(func(): journey_mode_requested.emit(map_id))
+	mode_row.add_child(journey)
 	var single := _btn("单人模式", Color("#d4a843"))
 	single.disabled = not enabled
 	single.pressed.connect(func(): single_player_requested.emit(map_id))
-	v.add_child(single)
+	mode_row.add_child(single)
 	var multi := _btn("多人模式（暂未开放）", Color("#7d6a4a"))
 	multi.disabled = true
 	v.add_child(multi)
