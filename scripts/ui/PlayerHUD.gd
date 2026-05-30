@@ -1,7 +1,7 @@
 extends Control
 ## 左上身份卡：头像、名称、等级、历史碎片、银两、藏品估值。
 
-const COIN_TEXTURE := "res://assets/ui/coin.png"
+const CoinIcon := preload("res://scripts/ui/CoinIcon.gd")
 
 var _money_label: Label
 var _inv_label: Label
@@ -96,11 +96,7 @@ func _build() -> void:
 func _make_money_box() -> HBoxContainer:
 	var box := HBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
-	var icon := TextureRect.new()
-	icon.custom_minimum_size = Vector2(18, 18)
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.texture = load(COIN_TEXTURE)
-	box.add_child(icon)
+	box.add_child(CoinIcon.make_icon(18))
 	_money_label = Label.new()
 	_money_label.text = "0"
 	_money_label.add_theme_font_size_override("font_size", 13)

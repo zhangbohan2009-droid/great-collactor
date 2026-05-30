@@ -5,6 +5,7 @@ var _tabs: TabContainer
 var _attr_page: ScrollContainer
 var _skill_page: ScrollContainer
 var _cn_font: SystemFont
+var _initial_tab_index: int = 0
 
 func _init() -> void:
 	title = "个人主页"
@@ -48,6 +49,12 @@ func _build() -> void:
 	_tabs.add_child(_skill_page)
 
 	_refresh()
+	_tabs.current_tab = clampi(_initial_tab_index, 0, _tabs.get_tab_count() - 1)
+
+func open_skill_tree_first() -> void:
+	_initial_tab_index = 1
+	if _tabs != null:
+		_tabs.current_tab = 1
 
 func _refresh() -> void:
 	_rebuild_attr_page()

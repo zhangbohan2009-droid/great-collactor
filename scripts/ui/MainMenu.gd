@@ -98,11 +98,11 @@ func _build_ui() -> void:
 	btn_new.pressed.connect(func(): new_game_requested.emit())
 	box.add_child(btn_new)
 
-	var btn_continue := _make_btn("继 续 游 戏", Color("#9bd47a"), BTN_BROWN, BTN_BROWN_PRESSED)
-	btn_continue.disabled = not SaveSystem.has_save()
-	btn_continue.tooltip_text = "没有存档" if btn_continue.disabled else "读取当前存档"
-	btn_continue.pressed.connect(func(): continue_requested.emit())
-	box.add_child(btn_continue)
+	if SaveSystem.has_resumable_save():
+		var btn_continue := _make_btn("继 续 游 戏", Color("#9bd47a"), BTN_BROWN, BTN_BROWN_PRESSED)
+		btn_continue.tooltip_text = "读取当前存档"
+		btn_continue.pressed.connect(func(): continue_requested.emit())
+		box.add_child(btn_continue)
 
 	var btn_codex := _make_btn("图 鉴", Color("#d4a843"), BTN_BEIGE, BTN_BEIGE_PRESSED)
 	btn_codex.tooltip_text = "查看所有已接入藏品，按稀有度和时代筛选"

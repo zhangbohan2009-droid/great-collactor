@@ -7,8 +7,8 @@ signal back_requested()
 var _name_edit: LineEdit
 var _selected_avatar := "collector_gold"
 var _selected_color := Color("#d4a843")
-var _selected_skill := ""
-var _skill_group: ButtonGroup
+var _upgrade_track := "appraisal"
+var _upgrade_group := ButtonGroup.new()
 
 func _init() -> void:
 	anchor_right = 1.0
@@ -50,7 +50,7 @@ func _build() -> void:
 	panel.add_child(root)
 
 	root.add_child(_label("创建藏家", 36, Color("#d4a843")))
-	root.add_child(_label("设置本局身份。初始技能点为 1 点，可先点亮一个入门技能。", 15, Color("#a89a82")))
+	root.add_child(_label("设置本局身份。「真伪鉴定」「议价」两项技能开局均未解锁；你有 1 点技能点，可选其一解锁至 Lv.1（另一项仍需日后在技能树中解锁）。开局还会随机抽取 3 张技能道具。", 15, Color("#a89a82")))
 
 	_name_edit = LineEdit.new()
 	_name_edit.text = "大收藏家"
@@ -67,17 +67,13 @@ func _build() -> void:
 	avatars.add_child(_avatar_btn("ink_blue", "掌眼先生", Color("#3a78a8")))
 	avatars.add_child(_avatar_btn("market_red", "市井掌柜", Color("#b03020")))
 
-	root.add_child(_label("初始技能", 18, Color("#f5e6c8")))
-	_skill_group = ButtonGroup.new()
-	_skill_group.allow_unpress = true
-	var skills := GridContainer.new()
-	skills.columns = 3
-	skills.add_theme_constant_override("h_separation", 10)
-	skills.add_theme_constant_override("v_separation", 10)
+	root.add_child(_label("选择 1 项解锁（消耗初始技能点）", 18, Color("#f5e6c8")))
+	var skills := HBoxContainer.new()
+	skills.alignment = BoxContainer.ALIGNMENT_CENTER
+	skills.add_theme_constant_override("separation", 12)
 	root.add_child(skills)
-	for skill in GameConfig.SKILL_TREE:
-		if skill.get("requires", []).is_empty():
-			skills.add_child(_skill_btn(skill))
+	skills.add_child(_upgrade_skill_card("appraisal", "真伪鉴定 Lv.0 → Lv.1", "看货时可花费眼力鉴定真伪、收窄估值。未解锁则相关按钮为虚置状态。", Color("#7da8d4")))
+	skills.add_child(_upgrade_skill_card("bargain", "议价 Lv.0 → Lv.1", "买入时压价、卖出时抬价。未解锁则相关按钮为虚置状态。", Color("#9bd47a")))
 
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -137,16 +133,48 @@ func _avatar_btn(id: String, text: String, color: Color) -> Button:
 	)
 	return b
 
-func _skill_btn(skill: Dictionary) -> Button:
-	var id := str(skill.get("id", ""))
-	var b := _btn("%s\n%s" % [str(skill.get("name", id)), str(skill.get("desc", ""))], Color("#7da8d4"))
-	b.custom_minimum_size = Vector2(220, 76)
-	b.toggle_mode = true
-	b.button_group = _skill_group
-	b.pressed.connect(func():
-		_selected_skill = id if b.button_pressed else ""
-	)
-	return b
+func _upgrade_skill_card(track_id: String, title: String, desc: String, color: Color) -> Button:
+	var card := Button.new()
+	card.custom_minimum_size = Vector2(300, 100)
+	card.toggle_mode = true
+	card.button_group = _upgrade_group
+	card.button_pressed = track_id == _upgrade_track
+	card.focus_mode = Control.FOCUS_NONE
+
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = color.darkened(0.62)
+	normal.border_color = color.darkened(0.25)
+	normal.set_border_width_all(2)
+	normal.set_corner_radius_all(8)
+	var pressed := normal.duplicate()
+	pressed.bg_color = color.darkened(0.35)
+	pressed.border_color = color
+	pressed.set_border_width_all(3)
+	card.add_theme_stylebox_override("normal", normal)
+	card.add_theme_stylebox_override("hover", normal)
+	card.add_theme_stylebox_override("focus", normal)
+	card.add_theme_stylebox_override("pressed", pressed)
+	card.add_theme_stylebox_override("hover_pressed", pressed)
+
+	var v := VBoxContainer.new()
+	v.anchor_right = 1.0
+	v.anchor_bottom = 1.0
+	v.offset_left = 12
+	v.offset_top = 8
+	v.offset_right = -12
+	v.offset_bottom = -8
+	v.add_theme_constant_override("separation", 4)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(v)
+	var t := _label(title, 17, Color("#f5e6c8"))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	v.add_child(t)
+	var d := _label(desc, 12, Color("#cdbf9f"))
+	d.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	v.add_child(d)
+
+	card.pressed.connect(func(): _upgrade_track = track_id)
+	return card
 
 func _on_start() -> void:
 	start_requested.emit({
@@ -154,7 +182,7 @@ func _on_start() -> void:
 		"avatar_id": _selected_avatar,
 		"color": _selected_color,
 		"skill_points": 1,
-		"initial_skill": _selected_skill,
+		"upgrade_track": _upgrade_track,
 	})
 
 func _label(text: String, size_px: int, color: Color) -> Label:

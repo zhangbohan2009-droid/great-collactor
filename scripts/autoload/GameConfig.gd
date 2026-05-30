@@ -1,8 +1,8 @@
 extends Node
 ## 全局常量配置
 
-const MAX_ROUNDS: int = 12
-const AUCTION_ROUNDS: Array[int] = [4, 8, 12]
+const MAX_ROUNDS: int = 20
+const AUCTION_ROUNDS: Array[int] = [8, 14, 20]
 const TOTAL_TILES: int = 20
 const PLAYER_COUNT: int = 3
 const HUMAN_PLAYER_ID: int = 0
@@ -200,7 +200,7 @@ const TOOL_DEFS: Array[Dictionary] = [
 	{ "id": "reverse_card", "name": "转向卡", "category": "移动", "timing": "掷骰前", "desc": "本次掷骰后反向移动。适合避开风险格或回头抢资源。" },
 	{ "id": "small_step_card", "name": "小步卡", "category": "移动", "timing": "掷骰前", "desc": "本次只掷 1-3 点，便于微调落点。" },
 	{ "id": "double_step_card", "name": "疾行卡", "category": "移动", "timing": "掷骰前", "desc": "本次骰点 +2，最高不超过 6。赶路强，精准度较低。" },
-	{ "id": "safe_pass_card", "name": "平安符", "category": "防御", "timing": "到达黑市", "desc": "到达黑市时自动消耗，跳过黑市事件并获得少量历史碎片。" },
+	{ "id": "safe_pass_card", "name": "平安符", "category": "防御", "timing": "预留", "desc": "黑市属于增益交易地块，不会被平安符跳过。当前版本平安符先作为保值护身道具保留。" },
 	{ "id": "appraisal_coupon", "name": "鉴定券", "category": "交易", "timing": "买入时", "desc": "下次买入文物时自动抵扣 30 两手续费。" },
 	{ "id": "market_peek_card", "name": "风闻卡", "category": "情报", "timing": "进城/黑市", "desc": "进入城市或黑市时自动消耗，提示本格可见货源的最高稀有度。" },
 	{ "id": "auction_hint_card", "name": "拍讯卡", "category": "情报", "timing": "拍卖前", "desc": "下一次拍卖开始时自动消耗，提前获得一条拍品价值风声。" },
@@ -257,6 +257,48 @@ const SKILL_TREE: Array[Dictionary] = [
 # 鉴定区间（MVP 用固定 ±30%）
 const APPRAISAL_LOW: float = 0.7
 const APPRAISAL_HIGH: float = 1.3
+
+# 技能线对应关系：鉴古线 = 真伪鉴定，交易线 = 议价。技能等级 = 该线已点亮节点数。
+const APPRAISAL_TRACK: String = "鉴古线"
+const BARGAIN_TRACK: String = "交易线"
+# 开局自动赠送的两条线根节点
+const STARTING_SKILL_IDS: Array[String] = ["patina_eye", "familiar_face"]
+
+# 议价每级降/抬价幅度（按技能等级线性累加）
+const BARGAIN_RATE_PER_LEVEL: float = 0.04
+# 鉴定检出赝品的基础概率 + 每级加成
+const APPRAISAL_FAKE_BASE: float = 0.40
+const APPRAISAL_FAKE_PER_LEVEL: float = 0.15
+# 验出赝品后，展示估价直接贬值到真实价值（已是真品价的 5%~25%），再额外打折表示“砸手里”
+const FAKE_REVEAL_VALUE_MULT: float = 1.0
+
+# 鉴定文字互动台词
+const APPRAISAL_FLAVOR: Dictionary = {
+	"genuine": [
+		"你借着光细看包浆与铸口，纹路自然、锈色入骨——是开门的真东西。",
+		"上手掂了掂分量，又看了看底款，越看越顺眼，确是真品。",
+		"凑近闻了闻土沁味，再以指腹摩挲断面，心里有了底：真。",
+	],
+	"fake": [
+		"你眯眼一看，包浆浮在表面，锈色一抹就掉——这是新仿的赝品！",
+		"底款笔意僵硬，铸口过于齐整，分量也不对——赝品无疑。",
+		"灯下细察，沁色是后做的，火气未褪，分明是一件赝品！",
+	],
+}
+
+# 议价文字互动台词（buy=压价；sell=抬价）
+const BARGAIN_FLAVOR: Dictionary = {
+	"buy": [
+		"“掌柜的，这价我可吃不消，少算些才好长久做买卖。”对方沉吟片刻，松了口。",
+		"你不动声色指出几处小瑕，对方脸上挂不住，价钱应声而落。",
+		"“老主顾了，给个实在价。”一番周旋，终于压下来几分。",
+	],
+	"sell": [
+		"你将这件器物的来路与品相娓娓道来，买主眼睛一亮，加了价。",
+		"“这样的成色，过了这村可没这店。”买主权衡再三，添了银钱。",
+		"你不急着出手，反让买主先开口，几轮拉扯下来，价码抬高了。",
+	],
+}
 
 # 调试：真人也由 AI 自动操作（用于 headless smoke test）
 var DEBUG_AUTOPLAY: bool = false
@@ -422,7 +464,7 @@ func _black_market_intro(place_name: String, hook: String) -> Dictionary:
 			hook,
 			"黑市货物整体更便宜，也更容易刷出高稀有度物件。",
 			"赝品概率明显更高，鉴定区间也会更宽，眼力不足时容易亏损。",
-			"携带平安符时，抵达黑市会自动消耗并跳过黑市事件；风闻卡可提前提示可见货源的最高稀有度。",
+			"黑市属于增益交易地块，平安符不会跳过黑市；风闻卡可提前提示可见货源的最高稀有度。",
 		],
 	}
 

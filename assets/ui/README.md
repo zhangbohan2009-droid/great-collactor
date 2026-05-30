@@ -1,8 +1,6 @@
 UI asset notes
 
-- coin.png comes from OpenGameArt "CC0 Currency Icons", file `currency-ocal_20201221.zip`, source `coin_03_gold.png`.
-- License: CC0 1.0 Universal.
-- Source page: https://opengameart.org/content/cc0-currency-icons
+- Coin icons are generated at runtime by `scripts/ui/CoinIcon.gd`, so the UI no longer depends on a missing `coin.png` source asset.
 
 - kenney_ui_pack/ comes from Kenney UI Pack, downloaded from the OpenGameArt mirror `kenney_ui-pack.zip`.
 - License: CC0 1.0 Universal.

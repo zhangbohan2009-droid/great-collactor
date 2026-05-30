@@ -16,11 +16,19 @@ const CITY_RARITY_PATTERNS: Array = [
 	[1, 2, 2, 3],
 ]
 
+## 人类到访该城的次数 → 稀有度档位（0=首次，越高货色越好）。
+## 各档位允许的最高稀有度：0→仅白蓝(2)，1→可到橙(3)，2→橙为主，3+→可出红(4)。
+const CITY_MAX_RARITY_BY_VISIT: Array[int] = [2, 3, 3, 4]
+
 const CITY_RARITY_BY_VISIT: Array = [
-	[[1, 1, 1, 2], [1, 1, 2, 2], [1, 1, 1, 1]],
-	[[1, 1, 2, 2], [1, 2, 2, 3], [1, 1, 2, 3]],
-	[[1, 2, 3, 3], [2, 2, 3, 3], [1, 2, 3, 4]],
-	[[2, 3, 3, 4], [2, 3, 4, 4], [3, 3, 4, 4]],
+	# 档位 0：首次进城，只刷白(1)/蓝(2)
+	[[1, 1, 1, 2], [1, 1, 2, 2], [1, 2, 2, 2], [2, 2, 2, 2]],
+	# 档位 1：第二次到访，仍以白蓝为主，偶尔橙
+	[[1, 1, 2, 2], [1, 2, 2, 2], [1, 2, 2, 3], [2, 2, 2, 3]],
+	# 档位 2：第三次起，蓝橙混合，小概率红
+	[[1, 2, 2, 3], [2, 2, 3, 3], [2, 2, 3, 3], [2, 3, 3, 3]],
+	# 档位 3+：老主顾，橙红皆可
+	[[2, 2, 3, 3], [2, 3, 3, 3], [2, 3, 3, 4], [3, 3, 4, 4]],
 ]
 
 ## 黑市配比：稀有度更高，但赝品概率更大（MVP 简化为 50% 假货）
@@ -95,6 +103,14 @@ static func roll_city_offers(rng: RandomNumberGenerator, player, visit_count: in
 	offers.shuffle()
 	return offers
 
+## 重抽单张城市交易卡（刷新键用）。kind 为 "buy"(求购) 或 "sell"(求售)。
+static func roll_single_city_offer(rng: RandomNumberGenerator, player, visit_count: int, preferred_country: String, kind: String) -> Dictionary:
+	if kind == "buy":
+		var buy_offer := _roll_city_buy_offer(rng, player)
+		if not buy_offer.is_empty():
+			return buy_offer
+	return _roll_city_sell_offer(rng, player, visit_count, preferred_country)
+
 static func _city_buy_slots(rng: RandomNumberGenerator, player) -> int:
 	if player == null or player.inventory.is_empty():
 		return 0
@@ -107,11 +123,13 @@ static func _city_buy_slots(rng: RandomNumberGenerator, player) -> int:
 
 static func _roll_city_sell_offer(rng: RandomNumberGenerator, player, visit_count: int = 0, preferred_country: String = "") -> Dictionary:
 	var tier: int = clampi(visit_count, 0, CITY_RARITY_BY_VISIT.size() - 1)
+	var max_rarity: int = CITY_MAX_RARITY_BY_VISIT[tier]
 	var patterns: Array = CITY_RARITY_BY_VISIT[tier]
 	var pattern: Array = patterns[rng.randi() % patterns.size()]
 	var rarity: int = int(pattern[rng.randi() % pattern.size()])
 	if player != null and player.skills.get("dark_market_tip", false) and rng.randf() < 0.10:
-		rarity = min(4, rarity + 1)
+		rarity = min(max_rarity, rarity + 1)
+	rarity = min(rarity, max_rarity)
 	var item := ItemsDBRef.random_item_by_rarity(rarity, rng, preferred_country)
 	if item == null:
 		return {}
@@ -137,9 +155,10 @@ static func _roll_city_buy_offer(rng: RandomNumberGenerator, player) -> Dictiona
 	var candidates: Array = player.inventory.duplicate()
 	candidates.shuffle()
 	var inst: Resource = candidates[0]
-	var premium: float = rng.randf_range(0.78, 1.28)
+	# 提高卖出利润：收购溢价整体上调
+	var premium: float = rng.randf_range(1.05, 1.55)
 	if inst.rarity() >= 3:
-		premium += rng.randf_range(0.05, 0.22)
+		premium += rng.randf_range(0.10, 0.35)
 	var offer_price: int = max(1, int(round(float(inst.real_price) * premium)))
 	return {
 		"kind": "buy",
@@ -206,15 +225,19 @@ static func ask_price(instance: Resource, rng: RandomNumberGenerator) -> int:
 	return rng.randi_range(low, high)
 
 static func ask_price_for_player(instance: Resource, rng: RandomNumberGenerator, player, is_black_market: bool = false) -> int:
+	# 议价后的暗价直接采用（黑市刷新前持久化）
+	if instance != null and int(instance.negotiated_price) > 0:
+		return int(instance.negotiated_price)
 	var price := ask_price(instance, rng)
 	if player == null:
 		return price
-	var discount := float(player.attributes.get("speech", 1)) * 0.02
+	# 提高买入利润：基础进价折扣 + 口才/技能加成，上限放宽
+	var discount := 0.10 + float(player.attributes.get("speech", 1)) * 0.02
 	if player.skills.get("familiar_face", false) and not is_black_market:
 		discount += 0.05
 	if player.skills.get("bargain_words", false):
 		discount += 0.05
-	discount = clampf(discount, 0.0, 0.28)
+	discount = clampf(discount, 0.0, 0.42)
 	return max(1, int(round(float(price) * (1.0 - discount))))
 
 static func adjusted_appraisal_range(instance: Resource, player) -> Vector2i:

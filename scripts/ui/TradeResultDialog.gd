@@ -1,6 +1,8 @@
 extends Window
 ## 购入 / 售出后的结算弹窗。
 
+const CoinIcon := preload("res://scripts/ui/CoinIcon.gd")
+
 var _mode := "purchase"
 var _inst: Resource = null
 var _before_fragments := 0
@@ -10,7 +12,6 @@ var _after_level := 1
 var _sale_price := 0
 var _paid_price := 0
 var _cn_font: SystemFont
-var _coin_texture: Texture2D
 
 func setup_purchase(inst: Resource, before_fragments: int, before_level: int, after_fragments: int, after_level: int) -> void:
 	_mode = "purchase"
@@ -29,8 +30,8 @@ func setup_sale(inst: Resource, sale_price: int, paid_price: int) -> void:
 	title = "交易结算"
 
 func _init() -> void:
-	size = Vector2i(560, 500)
-	min_size = Vector2i(500, 420)
+	size = Vector2i(560, 560)
+	min_size = Vector2i(520, 480)
 	transient = true
 	exclusive = true
 	always_on_top = true
@@ -38,7 +39,7 @@ func _init() -> void:
 func _ready() -> void:
 	_cn_font = SystemFont.new()
 	_cn_font.font_names = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "Arial Unicode MS"]
-	_coin_texture = _make_coin_texture(32)
+	add_theme_font_override("title_font", _cn_font)
 	_build()
 
 func _build() -> void:
@@ -68,27 +69,39 @@ func _build() -> void:
 	add_child(panel)
 
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 12)
+	root.add_theme_constant_override("separation", 10)
 	panel.add_child(root)
 
 	root.add_child(_title_label("文物入藏" if _mode == "purchase" else "交易结算"))
+
+	var body_scroll := ScrollContainer.new()
+	body_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(body_scroll)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 10)
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body_scroll.add_child(body)
+
 	if _inst != null:
 		var icon_center := CenterContainer.new()
 		icon_center.add_child(_relic_icon(_inst))
-		root.add_child(icon_center)
-		root.add_child(_center_label(_inst.display_name(), 24, Color("#f5e6c8")))
-		root.add_child(_center_label("%s · %s · %s" % [_inst.def.country, _inst.def.rarity_label(), _inst.def.type_icon()], 14, _inst.rarity_color()))
+		body.add_child(icon_center)
+		body.add_child(_center_label(_inst.display_name(), 24, Color("#f5e6c8")))
+		body.add_child(_center_label("%s · %s · %s" % [_inst.def.country, _inst.def.rarity_label(), _inst.def.type_icon()], 14, _inst.rarity_color()))
 
 	if _mode == "purchase":
-		_add_purchase_lines(root)
+		_add_purchase_lines(body)
 	else:
-		_add_sale_lines(root)
+		_add_sale_lines(body)
 
 	var story_text: String = str(_inst.def.story) if _inst != null and _inst.def != null else ""
 	if story_text != "":
-		var story := _label(story_text, 13, Color("#a89a82"))
-		story.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		root.add_child(story)
+		var story := _label(story_text, 13, Color("#a89a82"), true)
+		story.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		body.add_child(story)
 
 	var c := CenterContainer.new()
 	root.add_child(c)
@@ -141,32 +154,7 @@ func _money_row(label_text: String, amount: int, color: Color, suffix: String = 
 	return center
 
 func _coin_icon(size_px: int) -> TextureRect:
-	var coin := TextureRect.new()
-	coin.texture = _coin_texture
-	coin.custom_minimum_size = Vector2(size_px, size_px)
-	coin.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	coin.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	return coin
-
-func _make_coin_texture(size_px: int) -> Texture2D:
-	var img := Image.create(size_px, size_px, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0, 0, 0, 0))
-	var center := Vector2(float(size_px - 1) * 0.5, float(size_px - 1) * 0.5)
-	var radius := float(size_px) * 0.42
-	for y in range(size_px):
-		for x in range(size_px):
-			var p := Vector2(float(x), float(y))
-			var dist := p.distance_to(center)
-			if dist > radius:
-				continue
-			var t := clampf(dist / radius, 0.0, 1.0)
-			var color := Color("#f6c453").lerp(Color("#b66a1c"), t)
-			if dist > radius * 0.82:
-				color = Color("#7a3f12")
-			elif dist < radius * 0.38:
-				color = color.lightened(0.24)
-			img.set_pixel(x, y, color)
-	return ImageTexture.create_from_image(img)
+	return CoinIcon.make_icon(size_px)
 
 func _relic_icon(inst: Resource) -> Panel:
 	var panel := Panel.new()
@@ -192,11 +180,12 @@ func _center_label(text: String, size_px: int, color: Color) -> Label:
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return lbl
 
-func _label(text: String, size_px: int, color: Color) -> Label:
+func _label(text: String, size_px: int, color: Color, wrap: bool = false) -> Label:
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.add_theme_font_override("font", _cn_font)
 	lbl.add_theme_font_size_override("font_size", size_px)
 	lbl.add_theme_color_override("font_color", color)
-	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# 仅对需要换行的长文本开启自动换行；置于横排里的文字若开启会逐字竖排错乱。
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if wrap else TextServer.AUTOWRAP_OFF
 	return lbl

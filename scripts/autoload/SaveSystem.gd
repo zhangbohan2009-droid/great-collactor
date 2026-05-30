@@ -16,6 +16,22 @@ func _ready() -> void:
 func has_save() -> bool:
 	return FileAccess.file_exists(SAVE_PATH)
 
+func has_resumable_save() -> bool:
+	var data := _read_save_dict()
+	if data.is_empty():
+		return false
+	var phase := str(data.get("current_phase", ""))
+	if phase == "ranking":
+		return false
+	# 旅途模式没有回合上限，只要未进入结算阶段就可继续。
+	var mode := str(data.get("game_mode", data.get("profile", {}).get("game_mode", "normal")))
+	if mode == "journey":
+		return true
+	var round_num := int(data.get("current_round", 0))
+	if round_num >= GameConfig.MAX_ROUNDS:
+		return false
+	return true
+
 func save_game() -> bool:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f == null:
@@ -33,13 +49,8 @@ func request_save() -> void:
 	save_game()
 
 func load_game() -> bool:
-	if not has_save():
-		return false
-	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
-	if f == null:
-		return false
-	var parsed = JSON.parse_string(f.get_as_text())
-	if typeof(parsed) != TYPE_DICTIONARY:
+	var parsed := _read_save_dict()
+	if parsed.is_empty():
 		return false
 	GameState.load_from_save_dict(parsed)
 	return true
@@ -47,3 +58,14 @@ func load_game() -> bool:
 func delete_save() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+
+func _read_save_dict() -> Dictionary:
+	if not has_save():
+		return {}
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if f == null:
+		return {}
+	var parsed = JSON.parse_string(f.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {}
+	return parsed

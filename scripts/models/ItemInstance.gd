@@ -11,6 +11,11 @@ extends Resource
 @export var paid_price: int = 0
 @export var acquired_round: int = 0
 @export var acquired_from: String = ""
+# 真伪鉴定 / 议价 临时状态（看货时使用技能后生效）
+@export var appraisal_revealed: bool = false   # 已鉴定：揭示稀有度与估值
+@export var fake_detected: bool = false        # 鉴定时验出赝品（估价大幅贬值）
+@export var bargained: bool = false            # 本卡已议价（一卡一次）
+@export var negotiated_price: int = 0          # 议价后的暗价（黑市用，0 表示按公式计算）
 
 func display_name() -> String:
 	if def == null:
@@ -41,6 +46,10 @@ func to_save_dict() -> Dictionary:
 		"paid_price": paid_price,
 		"acquired_round": acquired_round,
 		"acquired_from": acquired_from,
+		"appraisal_revealed": appraisal_revealed,
+		"fake_detected": fake_detected,
+		"bargained": bargained,
+		"negotiated_price": negotiated_price,
 	}
 
 func setup_from_save_dict(data: Dictionary, item_def: Resource) -> void:
@@ -53,3 +62,7 @@ func setup_from_save_dict(data: Dictionary, item_def: Resource) -> void:
 	paid_price = int(data.get("paid_price", 0))
 	acquired_round = int(data.get("acquired_round", 0))
 	acquired_from = str(data.get("acquired_from", ""))
+	appraisal_revealed = bool(data.get("appraisal_revealed", false))
+	fake_detected = bool(data.get("fake_detected", false))
+	bargained = bool(data.get("bargained", false))
+	negotiated_price = int(data.get("negotiated_price", 0))

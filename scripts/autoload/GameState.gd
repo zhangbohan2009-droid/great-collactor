@@ -19,8 +19,14 @@ var _seen_intro: Dictionary = {}
 var codex_item_ids: Dictionary = {}
 var city_visit_counts: Dictionary = {}
 var region_visit_counts: Dictionary = {}
+# 仅统计「人类」到访每座城市的次数（决定该城货色稀有度档位；开局为 0 = 基本白蓝）。
+var human_city_visit_counts: Dictionary = {}
 var current_player_profile: Dictionary = {}
 var current_game_mode: String = "normal"
+# 本回合（人类）是否已在城市/黑市完成一次买卖。每回合掷骰阶段重置。
+var market_action_used: bool = false
+# 开局随机抽到、待提示展示的技能道具 id 列表（瞬态，展示后清空）。
+var pending_tool_grants: Array = []
 
 func reset_for_new_game() -> void:
 	rng.randomize()
@@ -31,6 +37,7 @@ func reset_for_new_game() -> void:
 	codex_item_ids.clear()
 	city_visit_counts.clear()
 	region_visit_counts.clear()
+	human_city_visit_counts.clear()
 	current_game_mode = "normal"
 	_build_players()
 	_build_map()
@@ -50,9 +57,10 @@ func apply_player_profile(profile: Dictionary) -> void:
 			human.tools[str(tool.get("id", ""))] = GameConfig.JOURNEY_TOOL_COUNT
 		_keep_human_only_for_journey()
 	human.unspent_skill_points = int(profile.get("skill_points", human.unspent_skill_points))
-	var skill_id := str(profile.get("initial_skill", ""))
-	if skill_id != "" and can_unlock_skill(human, skill_id):
-		unlock_skill(human.id, skill_id)
+	# 两条线初始均未解锁；用 1 点技能点解锁所选的一项根节点（0 → 1 级），另一项保持未解锁
+	_apply_starting_upgrade(human, str(profile.get("upgrade_track", "appraisal")))
+	# 开局随机抽 3 张技能道具
+	pending_tool_grants = _draw_starting_tools(human, 3)
 
 func has_seen_intro(type_key: String) -> bool:
 	return _seen_intro.get(type_key, false)
@@ -124,6 +132,7 @@ func to_save_dict() -> Dictionary:
 		"codex_item_ids": codex_item_ids,
 		"city_visit_counts": city_visit_counts,
 		"region_visit_counts": region_visit_counts,
+		"human_city_visit_counts": human_city_visit_counts,
 		"seen_intro": _seen_intro,
 		"profile": current_player_profile,
 	}
@@ -137,6 +146,7 @@ func load_from_save_dict(data: Dictionary) -> void:
 	codex_item_ids = data.get("codex_item_ids", {}).duplicate(true)
 	city_visit_counts = data.get("city_visit_counts", {}).duplicate(true)
 	region_visit_counts = data.get("region_visit_counts", {}).duplicate(true)
+	human_city_visit_counts = data.get("human_city_visit_counts", {}).duplicate(true)
 	current_player_profile = data.get("profile", {}).duplicate(true)
 	_build_map()
 	players.clear()
@@ -292,6 +302,16 @@ func city_visit_count(tile_index: int) -> int:
 func mark_city_visited(tile_index: int) -> void:
 	city_visit_counts[tile_index] = city_visit_count(tile_index) + 1
 
+## 人类到访某城的次数（用于该城货色稀有度档位）。
+func human_city_visit_count(tile_index: int) -> int:
+	return int(human_city_visit_counts.get(tile_index, 0))
+
+## 标记人类到访某城一次，返回到访后的总次数。
+func mark_human_city_visited(tile_index: int) -> int:
+	var n: int = human_city_visit_count(tile_index) + 1
+	human_city_visit_counts[tile_index] = n
+	return n
+
 func region_key_for_tile(tile) -> String:
 	if tile == null:
 		return ""
@@ -410,6 +430,60 @@ func skill_def(skill_id: String) -> Dictionary:
 		if str(s.get("id", "")) == skill_id:
 			return s
 	return {}
+
+## 用 1 点初始技能点解锁所选技能线（真伪鉴定 / 议价）的根节点：0 级 → 1 级。
+func _apply_starting_upgrade(player, track_choice: String) -> void:
+	if player == null:
+		return
+	var node_id := "patina_eye" if track_choice == "appraisal" else "familiar_face"
+	if player.skills.get(node_id, false):
+		return
+	player.skills[node_id] = true
+	player.unspent_skill_points = max(0, int(player.unspent_skill_points) - 1)
+
+## 开局随机抽 count 张技能道具，加入玩家道具栏并返回抽到的 id 列表（旅途模式道具已满，跳过）。
+func _draw_starting_tools(player, count: int) -> Array:
+	var drawn: Array = []
+	if player == null or is_journey_mode():
+		return drawn
+	var pool: Array = []
+	for t in GameConfig.TOOL_DEFS:
+		var tid := str(t.get("id", ""))
+		if tid != "":
+			pool.append(tid)
+	if pool.is_empty():
+		return drawn
+	for _i in range(count):
+		var tid: String = pool[rng.randi() % pool.size()]
+		drawn.append(tid)
+		player.tools[tid] = int(player.tools.get(tid, 0)) + 1
+	return drawn
+
+## 某条技能线已点亮的节点数（即该技能等级，0-4）。
+func skill_track_level(player, track: String) -> int:
+	if player == null:
+		return 0
+	var lv: int = 0
+	for s in GameConfig.SKILL_TREE:
+		if str(s.get("track", "")) == track and player.skills.get(str(s.get("id", "")), false):
+			lv += 1
+	return lv
+
+## 真伪鉴定技能等级（鉴古线）。
+func appraisal_skill_level(player) -> int:
+	return skill_track_level(player, GameConfig.APPRAISAL_TRACK)
+
+## 议价技能等级（交易线）。
+func bargain_skill_level(player) -> int:
+	return skill_track_level(player, GameConfig.BARGAIN_TRACK)
+
+## 本回合是否还能在城市/黑市交易（每回合仅一次）。
+func can_trade_this_turn() -> bool:
+	return not market_action_used
+
+## 标记本回合已完成一次交易。
+func mark_market_action_used() -> void:
+	market_action_used = true
 
 func can_unlock_skill(player, skill_id: String) -> bool:
 	if player == null or player.skills.get(skill_id, false):

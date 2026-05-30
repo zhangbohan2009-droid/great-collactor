@@ -10,7 +10,8 @@ const AuctionScreenUI := preload("res://scripts/ui/AuctionScreen.gd")
 const RankingScreenUI := preload("res://scripts/ui/RankingScreen.gd")
 const SettingsDialog := preload("res://scripts/ui/SettingsDialog.gd")
 const CodexDialog := preload("res://scripts/ui/CodexDialog.gd")
-const COIN_TEXTURE := "res://assets/ui/coin.png"
+const ToolGrantDialog := preload("res://scripts/ui/ToolGrantDialog.gd")
+const CoinIcon := preload("res://scripts/ui/CoinIcon.gd")
 
 var _current_screen: Control = null
 var _toast_layer: CanvasLayer = null
@@ -114,10 +115,25 @@ func _on_character_start(profile: Dictionary, _map_id: String) -> void:
 	_pending_journey_mode = false
 	_show_map_view()
 	await get_tree().process_frame
+	_show_tool_grant_prompt()
 	GameFlow.start_new_game()
 
+func _show_tool_grant_prompt() -> void:
+	var grants: Array = GameState.pending_tool_grants
+	if grants.is_empty():
+		return
+	var dlg := ToolGrantDialog.new()
+	dlg.setup(grants)
+	add_child(dlg)
+	dlg.close_requested.connect(func():
+		if is_instance_valid(dlg):
+			dlg.queue_free()
+	)
+	dlg.popup_centered()
+	GameState.pending_tool_grants = []
+
 func _on_continue_game() -> void:
-	if not SaveSystem.load_game():
+	if not SaveSystem.has_resumable_save() or not SaveSystem.load_game():
 		EventBus.toast.emit("没有可读取的存档", "warn")
 		return
 	_show_map_view()
@@ -228,11 +244,7 @@ func _on_money_delta(player_id: int, delta: int, reason: String) -> void:
 		text += "  %s" % reason
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
-	var icon := TextureRect.new()
-	icon.custom_minimum_size = Vector2(24, 24)
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.texture = load(COIN_TEXTURE)
-	row.add_child(icon)
+	row.add_child(CoinIcon.make_icon(24))
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_size_override("font_size", 18)

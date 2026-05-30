@@ -57,7 +57,8 @@ func _set_phase(phase: String) -> void:
 	EventBus.phase_changed.emit(phase)
 
 func _run_main_loop() -> void:
-	while _running and GameState.current_round < GameConfig.MAX_ROUNDS:
+	# 旅途模式不限制回合总数；普通模式封顶 MAX_ROUNDS。
+	while _running and (GameState.is_journey_mode() or GameState.current_round < GameConfig.MAX_ROUNDS):
 		GameState.current_round += 1
 		var round_num: int = GameState.current_round
 		_set_phase("round_begin")
@@ -93,6 +94,8 @@ func _phase_dice() -> void:
 	_city_stocks.clear()
 	_bm_stocks.clear()
 	_city_offers.clear()
+	# 新回合重置“每回合仅一次交易”限制
+	GameState.market_action_used = false
 	GameState.reset_ready_flags()
 	# 给真人 UI 留空间，AI 延迟掷骰
 	for p in GameState.players:
@@ -215,12 +218,6 @@ func _phase_event() -> void:
 		if tile == null:
 			GameState.mark_player_ready(p.id)
 			continue
-		if tile.type == MapTileModel.Type.BLACK_MARKET and GameState.consume_tool(p.id, "safe_pass_card"):
-			GameState.add_history_fragments(p.id, 25, "平安符避开 %s" % tile.display_name)
-			EventBus.toast.emit("%s 用平安符避开了 %s" % [p.display_name, tile.display_name], "good")
-			EventBus.tile_event_finished.emit(p.id, tile_index)
-			GameState.mark_player_ready(p.id)
-			continue
 		EventBus.tile_event_started.emit(p.id, tile_index)
 		if p.is_ai or (GameConfig.DEBUG_AUTOPLAY and p.id == GameConfig.HUMAN_PLAYER_ID):
 			_ai_handle_tile_async(p, tile)
@@ -289,6 +286,7 @@ func human_finish_tile_event() -> void:
 		match tile.type:
 			MapTileModel.Type.CITY:
 				GameState.mark_city_visited(tile.index)
+				GameState.mark_human_city_visited(tile.index)
 			MapTileModel.Type.SCENIC:
 				GameState.add_history_fragments(human.id, _scenic_reward(human), "游历 %s" % tile.display_name)
 			MapTileModel.Type.TEMPLE:
@@ -336,9 +334,26 @@ func get_city_stock(tile_index: int) -> Array:
 func get_city_offers(tile_index: int) -> Array:
 	if not _city_offers.has(tile_index) or _city_offers[tile_index].size() == 0:
 		var tile: Resource = GameState.tile_at(tile_index)
-		var visit_bonus: int = max(GameState.city_visit_count(tile_index), GameState.region_visit_count_for_tile(tile))
+		var visit_bonus: int = GameState.human_city_visit_count(tile_index)
 		_city_offers[tile_index] = MarketSystemRef.roll_city_offers(GameState.rng, GameState.human_player(), visit_bonus, tile.country if tile != null else "")
 	return _city_offers[tile_index]
+
+## 刷新城市某张交易卡：从卡池按同 kind 重抽一张替换并返回新卡（黑市不提供）。
+func refresh_city_offer(tile_index: int, offer: Dictionary) -> Dictionary:
+	var offers := get_city_offers(tile_index)
+	var idx := offers.find(offer)
+	if idx < 0:
+		return {}
+	var tile: Resource = GameState.tile_at(tile_index)
+	var country: String = tile.country if tile != null else ""
+	var visit_bonus: int = GameState.human_city_visit_count(tile_index)
+	var kind := str(offer.get("kind", "sell"))
+	var new_offer: Dictionary = MarketSystemRef.roll_single_city_offer(GameState.rng, GameState.human_player(), visit_bonus, country, kind)
+	if new_offer.is_empty():
+		return {}
+	offers[idx] = new_offer
+	_city_offers[tile_index] = offers
+	return new_offer
 
 func get_bm_stock(tile_index: int) -> Array:
 	if not _bm_stocks.has(tile_index) or _bm_stocks[tile_index].size() == 0:
@@ -351,12 +366,16 @@ func human_buy_item(tile_index: int, inst: Resource, price: int) -> bool:
 	var human = GameState.human_player()
 	if human == null:
 		return false
+	if not GameState.can_trade_this_turn():
+		EventBus.toast.emit("本回合已完成一次交易", "warn")
+		return false
 	if human.inventory.size() >= GameState.inventory_capacity(human):
 		EventBus.toast.emit("库容已满，先整理背包", "warn")
 		return false
 	var final_price := _discounted_price(human, price)
 	if not GameState.change_money(human.id, -final_price, "买入 %s" % inst.display_name()):
 		return false
+	GameState.mark_market_action_used()
 	var stock: Array
 	var tile = GameState.tile_at(tile_index)
 	if tile.type == MapTileModel.Type.BLACK_MARKET:
@@ -399,10 +418,14 @@ func human_sell_city_offer(tile_index: int, offer: Dictionary) -> bool:
 	var price := int(offer.get("offer_price", 0))
 	if inst == null or price <= 0:
 		return false
+	if not GameState.can_trade_this_turn():
+		EventBus.toast.emit("本回合已完成一次交易", "warn")
+		return false
 	if not human.inventory.has(inst):
 		EventBus.toast.emit("这件货已不在库中", "warn")
 		return false
 	human.inventory.erase(inst)
+	GameState.mark_market_action_used()
 	GameState.change_money(human.id, price, "卖出 %s" % inst.display_name())
 	var offers := get_city_offers(tile_index)
 	offers.erase(offer)

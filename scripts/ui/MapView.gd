@@ -42,6 +42,7 @@ var _map_meta: Dictionary = {}
 var _map_size := Vector2(6144, 4589)
 var _min_zoom := 0.25
 var _max_zoom := 1.0
+var _default_zoom := 1.0
 var _dragging := false
 var _last_drag_mouse_pos := Vector2.ZERO
 var _follow_enabled := true
@@ -69,6 +70,7 @@ func _ready() -> void:
 	await get_tree().process_frame
 	_layout_map()
 	_update_zoom_limits()
+	_default_zoom = _camera.zoom.x
 	_center_camera_on_player(_cam_focus_player_id, true)
 	set_process(true)
 	get_viewport().size_changed.connect(_on_viewport_resized)
@@ -213,7 +215,7 @@ func _build_ui() -> void:
 	_timeline.anchor_top = 1.0
 	_timeline.anchor_bottom = 1.0
 	_timeline.offset_left = -58
-	_timeline.offset_top = -364
+	_timeline.offset_top = -178
 	_timeline.offset_right = -12
 	_timeline.offset_bottom = -16
 
@@ -245,9 +247,9 @@ func _build_action_bar() -> void:
 	_action_bar.anchor_right = 0.5
 	_action_bar.anchor_top = 1.0
 	_action_bar.anchor_bottom = 1.0
-	_action_bar.offset_left = -340
+	_action_bar.offset_left = -420
 	_action_bar.offset_top = -70
-	_action_bar.offset_right = 340
+	_action_bar.offset_right = 420
 	_action_bar.offset_bottom = -16
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.08, 0.045, 0.025, 0.76)
@@ -271,6 +273,10 @@ func _build_action_bar() -> void:
 	var profile_btn := _make_action_button("◎ 个人主页")
 	profile_btn.pressed.connect(_open_profile_dialog)
 	row.add_child(profile_btn)
+
+	var skill_btn := _make_action_button("◇ 技能树")
+	skill_btn.pressed.connect(_open_skill_tree_dialog)
+	row.add_child(skill_btn)
 
 	var storage_btn := _make_action_button("▣ 仓库")
 	storage_btn.pressed.connect(_open_storage_dialog)
@@ -352,6 +358,11 @@ func _build_attribution() -> void:
 
 func _open_profile_dialog() -> void:
 	_open_overlay_dialog(ProfileDialog.new())
+
+func _open_skill_tree_dialog() -> void:
+	var dlg := ProfileDialog.new()
+	dlg.open_skill_tree_first()
+	_open_overlay_dialog(dlg)
 
 func _open_storage_dialog() -> void:
 	var dlg := InventoryDialog.new()
@@ -454,6 +465,18 @@ func _route_points_for_indices(from_index: int, to_index: int) -> Array[Vector2]
 			])
 	points.append(_tile_pixel_pos[to_index])
 	return points
+
+func _movement_points_for_indices(from_index: int, to_index: int) -> Array[Vector2]:
+	if from_index < 0 or to_index < 0 or from_index >= _tile_pixel_pos.size() or to_index >= _tile_pixel_pos.size():
+		return []
+	var n := GameState.map_tiles.size() if not GameState.map_tiles.is_empty() else GameConfig.TOTAL_TILES
+	if to_index == posmod(from_index + 1, n):
+		return _route_points_for_indices(from_index, to_index)
+	if to_index == posmod(from_index - 1, n):
+		var reversed_points: Array[Vector2] = _route_points_for_indices(to_index, from_index)
+		reversed_points.reverse()
+		return reversed_points
+	return [_tile_pixel_pos[from_index], _tile_pixel_pos[to_index]]
 
 func _add_route_path(points: Array[Vector2]) -> void:
 	if points.size() < 2:
@@ -912,6 +935,8 @@ func _on_follow_button_pressed() -> void:
 	_follow_enabled = _follow_btn.button_pressed
 	if _follow_enabled:
 		_cam_focus_player_id = GameConfig.HUMAN_PLAYER_ID
+		# 同时复位缩放与位置：把视角大小恢复成默认值，再居中到玩家。
+		_camera.zoom = Vector2.ONE * clampf(_default_zoom, _min_zoom, _max_zoom)
 		_center_camera_on_player(_cam_focus_player_id, false)
 
 func _on_dice_rolled(player_id: int, _value: int) -> void:
@@ -944,17 +969,37 @@ func _on_player_moved(player_id: int, from_index: int, to_index: int) -> void:
 		_cam_focus_player_id = GameConfig.HUMAN_PLAYER_ID
 	var tween := create_tween()
 	var offset := _token_offset_for(player_id)
+	var prev_idx := from_index
 	for idx in path:
 		if idx < 0 or idx >= _tile_pixel_pos.size():
 			continue
-		var target_pos: Vector2 = _tile_pixel_pos[idx] - token.size * 0.5 + offset
-		tween.tween_property(token, "position", target_pos, 0.36).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		_tween_token_step(tween, token, prev_idx, idx, offset)
+		prev_idx = idx
 	tween.tween_callback(func():
 		if _follow_enabled:
 			_cam_focus_player_id = GameConfig.HUMAN_PLAYER_ID
 		_show_region_visit_bonus(player_id, to_index)
 		GameState.mark_player_ready(player_id)
 	)
+
+func _tween_token_step(tween: Tween, token: Control, from_index: int, to_index: int, offset: Vector2) -> void:
+	var points := _movement_points_for_indices(from_index, to_index)
+	if points.size() < 2:
+		if to_index >= 0 and to_index < _tile_pixel_pos.size():
+			var fallback_pos: Vector2 = _tile_pixel_pos[to_index] - token.size * 0.5 + offset
+			tween.tween_property(token, "position", fallback_pos, 0.36).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		return
+	var total_len := 0.0
+	for i in range(points.size() - 1):
+		total_len += points[i].distance_to(points[i + 1])
+	if total_len <= 0.0:
+		return
+	var step_duration := clampf(total_len / 900.0, 0.28, 0.62)
+	for i in range(1, points.size()):
+		var seg_len := points[i - 1].distance_to(points[i])
+		var seg_duration: float = max(0.06, step_duration * (seg_len / total_len))
+		var target_pos: Vector2 = points[i] - token.size * 0.5 + offset
+		tween.tween_property(token, "position", target_pos, seg_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 func _show_region_visit_bonus(player_id: int, tile_index: int) -> void:
 	var tile = GameState.tile_at(tile_index)
