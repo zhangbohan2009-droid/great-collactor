@@ -95,7 +95,7 @@ func _avatar_btn(id: String, text: String, color: Color) -> Button:
 	var b := _btn("", color)
 	b.custom_minimum_size = Vector2(96, 84)
 	b.tooltip_text = text
-	b.icon = load(str(GameConfig.AVATAR_TEXTURES.get(id, "")))
+	b.icon = GameConfig.get_avatar_texture(id, 64)
 	b.expand_icon = true
 	b.toggle_mode = true
 	b.button_pressed = id == _selected_avatar

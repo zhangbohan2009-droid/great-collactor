@@ -11,6 +11,7 @@ func _ready() -> void:
 	EventBus.money_delta.connect(func(_player_id, _delta, _reason): request_save())
 	EventBus.item_acquired.connect(func(_player_id, _inst): request_save())
 	EventBus.skill_unlocked.connect(func(_player_id, _skill_id): request_save())
+	EventBus.tool_used.connect(func(_player_id, _tool_id): request_save())
 
 func has_save() -> bool:
 	return FileAccess.file_exists(SAVE_PATH)

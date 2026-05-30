@@ -4,9 +4,11 @@ extends Control
 var _dice_label: Label
 var _hint_label: Label
 var _roll_btn: Button
+var _tool_box: VBoxContainer
+var _fixed_row: HBoxContainer
 
 func _init() -> void:
-	custom_minimum_size = Vector2(154, 194)
+	custom_minimum_size = Vector2(204, 354)
 
 func _ready() -> void:
 	_build()
@@ -86,10 +88,20 @@ func _build() -> void:
 	roll_center.add_child(_roll_btn)
 	v.add_child(roll_center)
 
+	_tool_box = VBoxContainer.new()
+	_tool_box.add_theme_constant_override("separation", 4)
+	v.add_child(_tool_box)
+
+	_fixed_row = HBoxContainer.new()
+	_fixed_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_fixed_row.add_theme_constant_override("separation", 2)
+	v.add_child(_fixed_row)
+
 func _refresh() -> void:
 	var phase: String = GameState.current_phase
 	var human = GameState.human_player()
 	_roll_btn.disabled = true
+	_refresh_tool_buttons()
 	match phase:
 		"dice":
 			if human != null and not human.ready:
@@ -116,6 +128,80 @@ func _refresh() -> void:
 func _on_roll_pressed() -> void:
 	_roll_btn.disabled = true
 	GameFlow.roll_dice_for(GameConfig.HUMAN_PLAYER_ID)
+
+func _refresh_tool_buttons() -> void:
+	if _tool_box == null or _fixed_row == null:
+		return
+	for child in _tool_box.get_children():
+		child.queue_free()
+	for child in _fixed_row.get_children():
+		child.queue_free()
+	var human = GameState.human_player()
+	if human == null:
+		return
+	var move_tools := ["reverse_card", "small_step_card", "double_step_card", "fixed_dice_card"]
+	for tool_id in move_tools:
+		var count := GameState.tool_count(GameConfig.HUMAN_PLAYER_ID, tool_id)
+		if count <= 0:
+			continue
+		var btn := Button.new()
+		btn.text = "%s x%d" % [GameConfig.tool_name(tool_id), count]
+		btn.custom_minimum_size = Vector2(156, 26)
+		btn.add_theme_font_size_override("font_size", 12)
+		btn.disabled = not GameFlow.can_use_dice_tool(GameConfig.HUMAN_PLAYER_ID, tool_id)
+		btn.tooltip_text = str(GameConfig.tool_def(tool_id).get("desc", ""))
+		_apply_tool_button_style(btn, tool_id)
+		if tool_id == "fixed_dice_card":
+			btn.pressed.connect(_show_fixed_dice_choices)
+		else:
+			btn.pressed.connect(func(t: String = tool_id):
+				if GameFlow.use_dice_tool(GameConfig.HUMAN_PLAYER_ID, t):
+					_refresh()
+			)
+		_tool_box.add_child(btn)
+
+func _show_fixed_dice_choices() -> void:
+	for child in _fixed_row.get_children():
+		child.queue_free()
+	if not GameFlow.can_use_dice_tool(GameConfig.HUMAN_PLAYER_ID, "fixed_dice_card"):
+		return
+	for value in range(GameConfig.DICE_MIN, GameConfig.DICE_MAX + 1):
+		var btn := Button.new()
+		btn.text = str(value)
+		btn.custom_minimum_size = Vector2(26, 24)
+		btn.add_theme_font_size_override("font_size", 12)
+		btn.pressed.connect(func(v := value):
+			if GameFlow.use_dice_tool(GameConfig.HUMAN_PLAYER_ID, "fixed_dice_card", { "value": v }):
+				_dice_label.text = str(v)
+				_refresh()
+		)
+		_fixed_row.add_child(btn)
+
+func _apply_tool_button_style(btn: Button, tool_id: String) -> void:
+	var color := Color("#7da8d4")
+	match tool_id:
+		"fixed_dice_card":
+			color = Color("#d4a843")
+		"reverse_card":
+			color = Color("#c89aff")
+		"small_step_card":
+			color = Color("#9bd47a")
+		"double_step_card":
+			color = Color("#d4843a")
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color.darkened(0.48)
+	sb.border_color = color
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(5)
+	var hover := sb.duplicate()
+	hover.bg_color = color.darkened(0.28)
+	var disabled := sb.duplicate()
+	disabled.bg_color = Color("#3a3028")
+	disabled.border_color = Color("#5a5148")
+	btn.add_theme_stylebox_override("normal", sb)
+	btn.add_theme_stylebox_override("hover", hover)
+	btn.add_theme_stylebox_override("disabled", disabled)
+	btn.add_theme_color_override("font_color", Color("#f5e6c8"))
 
 func _on_phase_changed(_phase: String) -> void:
 	_refresh()

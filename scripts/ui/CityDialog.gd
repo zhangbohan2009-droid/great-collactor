@@ -60,6 +60,7 @@ func _ensure_font() -> void:
 
 func _build() -> void:
 	_offers = GameFlow.get_city_offers(_tile.index)
+	_apply_market_peek()
 	var bg := ColorRect.new()
 	bg.color = Color("#1f1610")
 	bg.anchor_right = 1.0
@@ -100,6 +101,20 @@ func _build() -> void:
 	close_btn.custom_minimum_size = Vector2(120, 36)
 	close_btn.pressed.connect(_request_close)
 	bottom.add_child(close_btn)
+
+func _apply_market_peek() -> void:
+	var human = GameState.human_player()
+	if human == null or GameState.tool_count(human.id, "market_peek_card") <= 0:
+		return
+	if not GameState.consume_tool(human.id, "market_peek_card"):
+		return
+	var best := 0
+	for offer in _offers:
+		var inst = offer.get("inst", offer.get("target_inst", null))
+		if inst != null and inst.has_method("rarity"):
+			best = max(best, int(inst.rarity()))
+	var label := GameConfig.RARITY_NAMES[best] if best > 0 and best < GameConfig.RARITY_NAMES.size() else "未知"
+	EventBus.toast.emit("风闻：%s 今日最高可能有「%s」级货源" % [_tile.display_name, label], "info")
 
 func _request_close() -> void:
 	if _closing_after_reveal:

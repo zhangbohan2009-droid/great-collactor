@@ -657,8 +657,7 @@ func _make_token(player) -> Control:
 	return root
 
 func _avatar_texture_for(player) -> Texture2D:
-	var path := str(GameConfig.AVATAR_TEXTURES.get(player.avatar_id, GameConfig.AVATAR_TEXTURES["collector_gold"]))
-	return load(path)
+	return GameConfig.get_avatar_texture(player.avatar_id, 32)
 
 func _redraw_all_tokens() -> void:
 	for id in _player_tokens.keys():
@@ -783,9 +782,10 @@ func _on_player_moved(player_id: int, from_index: int, to_index: int) -> void:
 		path.append(to_index)
 	else:
 		var n := GameConfig.TOTAL_TILES
+		var direction := GameFlow.get_last_move_direction(player_id)
 		var i := from_index
 		while i != to_index:
-			i = (i + 1) % n
+			i = posmod(i + direction, n)
 			path.append(i)
 	if _follow_enabled and player_id == GameConfig.HUMAN_PLAYER_ID:
 		_cam_focus_player_id = GameConfig.HUMAN_PLAYER_ID

@@ -162,7 +162,7 @@ func _apply_avatar(player) -> void:
 		tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 		_avatar.add_child(tex)
 	var avatar_image := _avatar.get_node("avatar_image") as TextureRect
-	avatar_image.texture = load(str(GameConfig.AVATAR_TEXTURES.get(player.avatar_id, GameConfig.AVATAR_TEXTURES["collector_gold"])))
+	avatar_image.texture = GameConfig.get_avatar_texture(player.avatar_id, 72)
 
 func _on_money_changed(_id: int, _amt: int) -> void:
 	_refresh()

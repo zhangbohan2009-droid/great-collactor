@@ -123,7 +123,7 @@ func _avatar_badge(player) -> Panel:
 	sb.set_corner_radius_all(11)
 	badge.add_theme_stylebox_override("panel", sb)
 	var avatar := TextureRect.new()
-	avatar.texture = load(str(GameConfig.AVATAR_TEXTURES.get(player.avatar_id, GameConfig.AVATAR_TEXTURES["collector_gold"])))
+	avatar.texture = GameConfig.get_avatar_texture(player.avatar_id, 24)
 	avatar.anchor_right = 1.0
 	avatar.anchor_bottom = 1.0
 	avatar.offset_left = 2

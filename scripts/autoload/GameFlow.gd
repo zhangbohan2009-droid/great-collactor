@@ -11,6 +11,7 @@ const MapTileModel := preload("res://scripts/models/MapTile.gd")
 
 var _running: bool = false
 var _last_dice_values: Dictionary = {}    # player_id -> dice value
+var _dice_mods: Dictionary = {}           # player_id -> { tool_id, forced_roll, max_roll, bonus_steps, direction }
 var _pending_tile_events: Dictionary = {} # player_id -> tile_index
 var _city_stocks: Dictionary = {}         # tile_index -> Array[ItemInstance]（拍卖回合刷新）
 var _bm_stocks: Dictionary = {}
@@ -87,6 +88,7 @@ func _run_main_loop() -> void:
 func _phase_dice() -> void:
 	_set_phase("dice")
 	_last_dice_values.clear()
+	_dice_mods.clear()
 	# 新回合刷新各城/黑市库存
 	_city_stocks.clear()
 	_bm_stocks.clear()
@@ -105,6 +107,9 @@ func _ai_roll_async(player) -> void:
 	await get_tree().create_timer(randf_range(0.6, 1.2)).timeout
 	if not _running:
 		return
+	var choice: Dictionary = AISystemRef.choose_dice_tool(player, GameState.map_tiles, GameState.rng)
+	if not choice.is_empty():
+		use_dice_tool(player.id, str(choice.get("id", "")), choice.get("payload", {}))
 	roll_dice_for(player.id)
 
 # 调试用：真人在 AUTOPLAY 模式下也自动掷骰
@@ -121,10 +126,57 @@ func roll_dice_for(player_id: int) -> void:
 		return
 	if GameState.current_phase != "dice":
 		return
-	var v: int = DiceSystemRef.roll(GameState.rng)
+	var mod: Dictionary = _dice_mods.get(player_id, {})
+	var v: int = int(mod.get("forced_roll", 0))
+	if v <= 0:
+		if mod.has("max_roll"):
+			v = GameState.rng.randi_range(GameConfig.DICE_MIN, int(mod.get("max_roll", GameConfig.DICE_MAX)))
+		else:
+			v = DiceSystemRef.roll(GameState.rng)
+	v = min(GameConfig.DICE_MAX, v + int(mod.get("bonus_steps", 0)))
 	_last_dice_values[player_id] = v
 	EventBus.dice_rolled.emit(player_id, v)
 	GameState.mark_player_ready(player_id)
+
+func can_use_dice_tool(player_id: int, tool_id: String) -> bool:
+	if GameState.current_phase != "dice":
+		return false
+	var p = GameState.get_player(player_id)
+	if p == null or p.ready:
+		return false
+	if not GameConfig.MOVEMENT_TOOL_IDS.has(tool_id):
+		return false
+	if _dice_mods.has(player_id):
+		return false
+	return GameState.tool_count(player_id, tool_id) > 0
+
+func use_dice_tool(player_id: int, tool_id: String, payload: Dictionary = {}) -> bool:
+	if not can_use_dice_tool(player_id, tool_id):
+		return false
+	var mod := { "tool_id": tool_id, "direction": 1 }
+	match tool_id:
+		"fixed_dice_card":
+			var value := clampi(int(payload.get("value", 1)), GameConfig.DICE_MIN, GameConfig.DICE_MAX)
+			mod["forced_roll"] = value
+		"reverse_card":
+			mod["direction"] = -1
+		"small_step_card":
+			mod["max_roll"] = 3
+		"double_step_card":
+			mod["bonus_steps"] = 2
+		_:
+			return false
+	if not GameState.consume_tool(player_id, tool_id):
+		return false
+	_dice_mods[player_id] = mod
+	EventBus.toast.emit("%s 使用了%s" % [GameState.get_player(player_id).display_name, GameConfig.tool_name(tool_id)], "info")
+	return true
+
+func dice_tool_used(player_id: int) -> bool:
+	return _dice_mods.has(player_id)
+
+func get_last_move_direction(player_id: int) -> int:
+	return int(_dice_mods.get(player_id, {}).get("direction", 1))
 
 # -----------------------------------------------------
 # Move（同时移动）
@@ -136,7 +188,8 @@ func _phase_move() -> void:
 	for p in GameState.players:
 		var steps: int = int(_last_dice_values.get(p.id, 0))
 		var from_index: int = p.position
-		var to_index: int = DiceSystemRef.target_index(from_index, steps, GameConfig.TOTAL_TILES)
+		var direction := get_last_move_direction(p.id)
+		var to_index: int = DiceSystemRef.target_index(from_index, steps, GameConfig.TOTAL_TILES, direction)
 		p.position = to_index
 		_pending_tile_events[p.id] = to_index
 		EventBus.player_moved.emit(p.id, from_index, to_index)
@@ -159,6 +212,12 @@ func _phase_event() -> void:
 		var tile_index: int = int(_pending_tile_events.get(p.id, p.position))
 		var tile = GameState.tile_at(tile_index)
 		if tile == null:
+			GameState.mark_player_ready(p.id)
+			continue
+		if tile.type == MapTileModel.Type.BLACK_MARKET and GameState.consume_tool(p.id, "safe_pass_card"):
+			GameState.add_history_fragments(p.id, 25, "平安符避开 %s" % tile.display_name)
+			EventBus.toast.emit("%s 用平安符避开了 %s" % [p.display_name, tile.display_name], "good")
+			EventBus.tile_event_finished.emit(p.id, tile_index)
 			GameState.mark_player_ready(p.id)
 			continue
 		EventBus.tile_event_started.emit(p.id, tile_index)
@@ -184,7 +243,7 @@ func _ai_handle_tile_sync(player, tile) -> void:
 			var pick = AISystemRef.choose_city_pick(player, stock, GameState.rng)
 			if pick != null:
 				var inst: Resource = pick["inst"]
-				var ask: int = int(pick["ask"])
+				var ask: int = _discounted_price(player, int(pick["ask"]))
 				if GameState.change_money(player.id, -ask):
 					inst.paid_price = ask
 					inst.acquired_round = GameState.current_round
@@ -199,7 +258,7 @@ func _ai_handle_tile_sync(player, tile) -> void:
 			var pick2 = AISystemRef.choose_black_market_pick(player, stock2, GameState.rng)
 			if pick2 != null:
 				var inst2: Resource = pick2["inst"]
-				var ask2: int = int(pick2["ask"])
+				var ask2: int = _discounted_price(player, int(pick2["ask"]))
 				if GameState.change_money(player.id, -ask2):
 					inst2.paid_price = ask2
 					inst2.acquired_round = GameState.current_round
@@ -272,7 +331,8 @@ func human_buy_item(tile_index: int, inst: Resource, price: int) -> bool:
 	if human.inventory.size() >= GameState.inventory_capacity(human):
 		EventBus.toast.emit("库容已满，先整理背包", "warn")
 		return false
-	if not GameState.change_money(human.id, -price, "买入 %s" % inst.display_name()):
+	var final_price := _discounted_price(human, price)
+	if not GameState.change_money(human.id, -final_price, "买入 %s" % inst.display_name()):
 		return false
 	var stock: Array
 	var tile = GameState.tile_at(tile_index)
@@ -281,12 +341,20 @@ func human_buy_item(tile_index: int, inst: Resource, price: int) -> bool:
 	else:
 		stock = get_city_stock(tile_index)
 	stock.erase(inst)
-	inst.paid_price = price
+	inst.paid_price = final_price
 	inst.acquired_round = GameState.current_round
 	inst.acquired_from = tile.display_name
 	GameState.add_item_to_player(human.id, inst)
-	EventBus.toast.emit("你以 %d 两买入 %s" % [price, inst.display_name()], "good")
+	EventBus.toast.emit("你以 %d 两买入 %s" % [final_price, inst.display_name()], "good")
 	return true
+
+func _discounted_price(player, price: int) -> int:
+	if player != null and GameState.tool_count(player.id, "appraisal_coupon") > 0:
+		if GameState.consume_tool(player.id, "appraisal_coupon"):
+			var discounted: int = max(1, price - 30)
+			EventBus.toast.emit("%s 使用鉴定券，省下 %d 两" % [player.display_name, price - discounted], "good")
+			return discounted
+	return price
 
 func human_buy_city_offer(tile_index: int, offer: Dictionary) -> bool:
 	var inst: Resource = offer.get("inst", null)
@@ -327,6 +395,7 @@ func _phase_auction(round_num: int) -> void:
 	EventBus.toast.emit("第 %d 回合拍卖会开始" % round_num, "good")
 	await get_tree().create_timer(0.6).timeout
 	GameState.auction_session = AuctionSystemRef.create_session(round_num, GameState.rng)
+	_apply_auction_hints()
 	EventBus.auction_started.emit(GameState.auction_session)
 	# 等 AuctionScreen 处理完发回信号
 	await EventBus.auction_finished
@@ -335,6 +404,20 @@ func _phase_auction(round_num: int) -> void:
 ## 当本场拍卖结束时由 AuctionScreen 调
 func notify_auction_finished() -> void:
 	EventBus.auction_finished.emit()
+
+func _apply_auction_hints() -> void:
+	for p in GameState.players:
+		if GameState.tool_count(p.id, "auction_hint_card") <= 0:
+			continue
+		if not GameState.consume_tool(p.id, "auction_hint_card"):
+			continue
+		var lots: Array = GameState.auction_session.get("lots", [])
+		if lots.is_empty():
+			continue
+		var lot: Dictionary = lots[0]
+		var inst = lot.get("instance", null)
+		if inst != null:
+			EventBus.toast.emit("%s 获得拍讯：首件拍品约 %d-%d 两" % [p.display_name, int(inst.appraised_low), int(inst.appraised_high)], "info")
 
 # -----------------------------------------------------
 # Ready 状态聚合

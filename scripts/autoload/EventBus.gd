@@ -32,6 +32,7 @@ signal item_acquired(player_id: int, item_instance)        # ItemInstance
 signal history_fragments_changed(player_id: int, total: int, gained: int, reason: String)
 signal player_leveled_up(player_id: int, new_level: int)
 signal skill_unlocked(player_id: int, skill_id: String)
+signal tool_used(player_id: int, tool_id: String)
 signal codex_unlocked(item_id: String)
 
 # === 拍卖 ===

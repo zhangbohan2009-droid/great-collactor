@@ -68,8 +68,18 @@ func _build_players() -> void:
 		p.unspent_skill_points = 0
 		p.attributes = GameConfig.DEFAULT_ATTRIBUTES.duplicate(true)
 		p.skills = {}
-		p.tools = GameConfig.DEFAULT_TOOLS.duplicate(true)
+		p.tools = _initial_tools_for(p)
 		players.append(p)
+
+func _initial_tools_for(player) -> Dictionary:
+	var tools := GameConfig.DEFAULT_TOOLS.duplicate(true)
+	var loadout_key := str(player.avatar_id)
+	if player.is_ai:
+		loadout_key = "ai_li" if player.id == 1 else "ai_lu"
+	var loadout: Dictionary = GameConfig.INITIAL_TOOL_LOADOUTS.get(loadout_key, {})
+	for tool_id in loadout.keys():
+		tools[tool_id] = int(tools.get(tool_id, 0)) + int(loadout[tool_id])
+	return tools
 
 func to_save_dict() -> Dictionary:
 	var player_data: Array = []
@@ -131,7 +141,7 @@ func load_from_save_dict(data: Dictionary) -> void:
 		p.unspent_skill_points = int(pdata.get("unspent_skill_points", 0))
 		p.attributes = pdata.get("attributes", GameConfig.DEFAULT_ATTRIBUTES).duplicate(true)
 		p.skills = pdata.get("skills", {}).duplicate(true)
-		p.tools = pdata.get("tools", GameConfig.DEFAULT_TOOLS).duplicate(true)
+		p.tools = _normalize_tools(pdata.get("tools", GameConfig.DEFAULT_TOOLS))
 		p.inventory = []
 		for inst_data in pdata.get("inventory", []):
 			var item_def = ItemsDBRef.item_by_id(str(inst_data.get("item_id", "")))
@@ -141,6 +151,40 @@ func load_from_save_dict(data: Dictionary) -> void:
 			inst.setup_from_save_dict(inst_data, item_def)
 			p.inventory.append(inst)
 		players.append(p)
+
+func _normalize_tools(raw_tools) -> Dictionary:
+	var tools := GameConfig.DEFAULT_TOOLS.duplicate(true)
+	if typeof(raw_tools) == TYPE_DICTIONARY:
+		for tool_id in raw_tools.keys():
+			if tools.has(tool_id):
+				tools[tool_id] = max(0, int(raw_tools[tool_id]))
+	return tools
+
+func tool_count(player_id: int, tool_id: String) -> int:
+	var p = get_player(player_id)
+	if p == null:
+		return 0
+	return int(p.tools.get(tool_id, 0))
+
+func add_tool(player_id: int, tool_id: String, amount: int = 1) -> bool:
+	var p = get_player(player_id)
+	if p == null or amount <= 0:
+		return false
+	if not p.tools.has(tool_id):
+		p.tools[tool_id] = 0
+	p.tools[tool_id] = int(p.tools.get(tool_id, 0)) + amount
+	return true
+
+func consume_tool(player_id: int, tool_id: String, amount: int = 1) -> bool:
+	var p = get_player(player_id)
+	if p == null or amount <= 0:
+		return false
+	var current := int(p.tools.get(tool_id, 0))
+	if current < amount:
+		return false
+	p.tools[tool_id] = current - amount
+	EventBus.tool_used.emit(player_id, tool_id)
+	return true
 
 func _build_map() -> void:
 	map_tiles.clear()

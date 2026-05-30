@@ -58,7 +58,21 @@ func setup(tile) -> void:
 
 func _ready() -> void:
 	_stock = GameFlow.get_bm_stock(_tile.index)
+	_apply_market_peek()
 	_build()
+
+func _apply_market_peek() -> void:
+	var human = GameState.human_player()
+	if human == null or GameState.tool_count(human.id, "market_peek_card") <= 0:
+		return
+	if not GameState.consume_tool(human.id, "market_peek_card"):
+		return
+	var best := 0
+	for inst in _stock:
+		if inst != null and inst.has_method("rarity"):
+			best = max(best, int(inst.rarity()))
+	var label := GameConfig.RARITY_NAMES[best] if best > 0 and best < GameConfig.RARITY_NAMES.size() else "未知"
+	EventBus.toast.emit("风闻：%s 暗摊最高可能有「%s」级货源" % [_tile.display_name, label], "info")
 
 func _build() -> void:
 	var bg := ColorRect.new()

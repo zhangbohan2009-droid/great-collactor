@@ -21,6 +21,7 @@ func _ready() -> void:
 	EventBus.item_acquired.connect(_on_item_changed)
 	EventBus.codex_unlocked.connect(_on_codex_changed)
 	EventBus.money_changed.connect(func(_id, _amount): _refresh())
+	EventBus.tool_used.connect(func(_player_id, _tool_id): _refresh())
 
 func _build() -> void:
 	var bg := ColorRect.new()
@@ -77,7 +78,7 @@ func _tools_page() -> ScrollContainer:
 	for tool in GameConfig.TOOL_DEFS:
 		var id := str(tool.get("id", ""))
 		var count := int(p.tools.get(id, 0))
-		v.add_child(_tool_card(str(tool.get("name", id)), count, str(tool.get("desc", ""))))
+		v.add_child(_tool_card(tool, count))
 	return scroll
 
 func _codex_page() -> ScrollContainer:
@@ -128,13 +129,55 @@ func _artifact_card(inst) -> Panel:
 	v.add_child(_label(inst.def.story, 12, Color("#9bd47a")))
 	return panel
 
-func _tool_card(name: String, count: int, desc: String) -> Panel:
+func _tool_card(tool: Dictionary, count: int) -> Panel:
+	var id := str(tool.get("id", ""))
+	var name := str(tool.get("name", id))
+	var desc := str(tool.get("desc", ""))
+	var category := str(tool.get("category", "道具"))
+	var timing := str(tool.get("timing", ""))
 	var panel := _base_panel(Color("#7da8d4"))
-	panel.custom_minimum_size = Vector2(0, 82)
-	var v := _content_box(panel)
+	panel.custom_minimum_size = Vector2(0, 106)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 10)
+	h.anchor_right = 1.0
+	h.anchor_bottom = 1.0
+	h.offset_left = 10
+	h.offset_top = 8
+	h.offset_right = -10
+	h.offset_bottom = -8
+	panel.add_child(h)
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 4)
+	h.add_child(v)
 	v.add_child(_label("%s x%d" % [name, count], 17, Color("#f5e6c8")))
+	v.add_child(_label("%s · %s" % [category, timing], 12, Color("#d4a843")))
 	v.add_child(_label(desc, 13, Color("#a89a82")))
+	var action := Button.new()
+	action.custom_minimum_size = Vector2(116, 34)
+	action.add_theme_font_override("font", _cn_font)
+	action.add_theme_font_size_override("font_size", 12)
+	action.text = _tool_action_text(id)
+	action.disabled = not _can_use_tool_from_bag(id, count)
+	action.tooltip_text = "控骰卡需要在骰子面板选择点数。" if id == "fixed_dice_card" else desc
+	action.pressed.connect(func():
+		if GameFlow.use_dice_tool(GameConfig.HUMAN_PLAYER_ID, id):
+			_refresh()
+	)
+	h.add_child(action)
 	return panel
+
+func _tool_action_text(tool_id: String) -> String:
+	if GameConfig.MOVEMENT_TOOL_IDS.has(tool_id):
+		return "使用" if tool_id != "fixed_dice_card" else "骰子面板"
+	return "自动触发"
+
+func _can_use_tool_from_bag(tool_id: String, count: int) -> bool:
+	if count <= 0:
+		return false
+	if tool_id == "fixed_dice_card":
+		return false
+	return GameFlow.can_use_dice_tool(GameConfig.HUMAN_PLAYER_ID, tool_id)
 
 func _codex_card(item) -> Panel:
 	var unlocked := GameState.codex_item_ids.has(item.id)

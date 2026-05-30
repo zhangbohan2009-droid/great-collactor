@@ -35,14 +35,30 @@ const PLAYER_COLORS: Array[Color] = [
 ]
 const PLAYER_NAMES: Array[String] = ["你", "李员外", "陆掌柜"]
 const PLAYER_AVATARS: Array[String] = ["collector_gold", "ink_blue", "market_red"]
-const AVATAR_TEXTURES: Dictionary = {
-	"collector_gold": "res://assets/ui/avatars/collector_gold.svg",
-	"jade_green": "res://assets/ui/avatars/jade_green.svg",
-	"ink_blue": "res://assets/ui/avatars/ink_blue.svg",
-	"market_red": "res://assets/ui/avatars/market_red.svg",
-	"merchant_blue": "res://assets/ui/avatars/ink_blue.svg",
-	"patron_red": "res://assets/ui/avatars/market_red.svg",
+const AVATAR_COLORS: Dictionary = {
+	"collector_gold": Color("#d4a843"),
+	"jade_green": Color("#4a8060"),
+	"ink_blue": Color("#3a78a8"),
+	"market_red": Color("#b03020"),
+	"merchant_blue": Color("#3a78a8"),
+	"patron_red": Color("#b03020"),
 }
+
+var _avatar_block_cache: Dictionary = {}
+
+func get_avatar_color(avatar_id: String) -> Color:
+	return AVATAR_COLORS.get(avatar_id, AVATAR_COLORS["collector_gold"])
+
+func get_avatar_texture(avatar_id: String, size: int = 64) -> Texture2D:
+	var key := "%s:%d" % [avatar_id, size]
+	if _avatar_block_cache.has(key):
+		return _avatar_block_cache[key]
+	var color: Color = get_avatar_color(avatar_id)
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(color)
+	var tex := ImageTexture.create_from_image(img)
+	_avatar_block_cache[key] = tex
+	return tex
 
 const HISTORY_LEVELS: Array[Dictionary] = [
 	{ "level": 1, "fragments": 0, "title": "初入行" },
@@ -77,19 +93,49 @@ const ATTRIBUTE_LABELS: Dictionary = {
 
 const START_INVENTORY_CAPACITY: int = 8
 
+const TOOL_DEFS: Array[Dictionary] = [
+	{ "id": "fixed_dice_card", "name": "控骰卡", "category": "移动", "timing": "掷骰前", "desc": "本次掷骰指定 1-6 点。强力卡，每回合不可与其他移动卡叠加。" },
+	{ "id": "reverse_card", "name": "转向卡", "category": "移动", "timing": "掷骰前", "desc": "本次掷骰后反向移动。适合避开风险格或回头抢资源。" },
+	{ "id": "small_step_card", "name": "小步卡", "category": "移动", "timing": "掷骰前", "desc": "本次只掷 1-3 点，便于微调落点。" },
+	{ "id": "double_step_card", "name": "疾行卡", "category": "移动", "timing": "掷骰前", "desc": "本次骰点 +2，最高不超过 6。赶路强，精准度较低。" },
+	{ "id": "safe_pass_card", "name": "平安符", "category": "防御", "timing": "到达黑市", "desc": "到达黑市时自动消耗，跳过黑市事件并获得少量历史碎片。" },
+	{ "id": "appraisal_coupon", "name": "鉴定券", "category": "交易", "timing": "买入时", "desc": "下次买入文物时自动抵扣 30 两手续费。" },
+	{ "id": "market_peek_card", "name": "风闻卡", "category": "情报", "timing": "进城/黑市", "desc": "进入城市或黑市时自动消耗，提示本格可见货源的最高稀有度。" },
+	{ "id": "auction_hint_card", "name": "拍讯卡", "category": "情报", "timing": "拍卖前", "desc": "下一次拍卖开始时自动消耗，提前获得一条拍品价值风声。" },
+	{ "id": "relic_guard_card", "name": "护藏卡", "category": "防御", "timing": "预留", "desc": "未来用于保护一件藏品免受负面事件影响。当前版本先作为保值道具。" },
+]
+
 const DEFAULT_TOOLS: Dictionary = {
-	"appraisal_note": 1,
-	"travel_token": 0,
-	"relic_case": 0,
-	"rumor_note": 0,
+	"fixed_dice_card": 0,
+	"reverse_card": 0,
+	"small_step_card": 0,
+	"double_step_card": 0,
+	"safe_pass_card": 0,
+	"appraisal_coupon": 0,
+	"market_peek_card": 0,
+	"auction_hint_card": 0,
+	"relic_guard_card": 0,
 }
 
-const TOOL_DEFS: Array[Dictionary] = [
-	{ "id": "appraisal_note", "name": "鉴定札", "desc": "下次鉴定额外缩小估值区间。MVP 中先作为库存展示。" },
-	{ "id": "travel_token", "name": "行脚令", "desc": "用于未来快速移动或进入远程地标。" },
-	{ "id": "relic_case", "name": "护藏匣", "desc": "用于未来保护珍贵文物，减少意外损耗。" },
-	{ "id": "rumor_note", "name": "风闻笺", "desc": "用于未来提前查看拍卖或黑市情报。" },
-]
+const INITIAL_TOOL_LOADOUTS: Dictionary = {
+	"collector_gold": { "fixed_dice_card": 1, "small_step_card": 1, "appraisal_coupon": 1 },
+	"jade_green": { "reverse_card": 1, "appraisal_coupon": 2, "market_peek_card": 1 },
+	"ink_blue": { "small_step_card": 1, "market_peek_card": 2, "safe_pass_card": 1 },
+	"market_red": { "reverse_card": 2, "double_step_card": 1, "auction_hint_card": 1 },
+	"ai_li": { "reverse_card": 1, "double_step_card": 1, "appraisal_coupon": 1 },
+	"ai_lu": { "small_step_card": 1, "market_peek_card": 1, "auction_hint_card": 1 },
+}
+
+const MOVEMENT_TOOL_IDS: Array[String] = ["fixed_dice_card", "reverse_card", "small_step_card", "double_step_card"]
+
+func tool_def(tool_id: String) -> Dictionary:
+	for tool in TOOL_DEFS:
+		if str(tool.get("id", "")) == tool_id:
+			return tool
+	return {}
+
+func tool_name(tool_id: String) -> String:
+	return str(tool_def(tool_id).get("name", tool_id))
 
 const SKILL_TREE: Array[Dictionary] = [
 	{ "id": "patina_eye", "track": "鉴古线", "name": "细看包浆", "cost": 1, "requires": [], "desc": "鉴定费用 -15%。" },
